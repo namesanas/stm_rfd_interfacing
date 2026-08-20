@@ -48,6 +48,21 @@
 #define NVIC_IRQ_PRI14      14
 #define NVIC_IRQ_PRI15      15
 
+#define IRQ_NO_EXTI0				6
+#define IRQ_NO_EXTI1				7
+#define IRQ_NO_EXTI2				8
+#define IRQ_NO_EXTI3				9
+#define IRQ_NO_EXTI4				10
+#define IRQ_NO_EXTI9_5				23
+#define IRQ_NO_EXTI15_10			40
+
+#define IRQ_NO_SPI1					35
+#define IRQ_NO_SPI2					36
+#define IRQ_NO_SPI3					51
+
+#define IRQ_NO_I2C_EV				31
+#define IRQ_NO_I2C_ER				32
+
 
 //3. Memory map
 
