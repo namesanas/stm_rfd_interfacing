@@ -275,3 +275,164 @@ void GPIO_Init(GPIO_Handle_t *pGPIOHandle)
     }
 }
 
+void GPIO_DeInit(GPIO_RegDef_t *pGPIOx)
+{
+    if(pGPIOx == GPIOA)
+    {
+        GPIOA_REG_RESET();
+    }
+    else if(pGPIOx == GPIOB)
+    {
+        GPIOB_REG_RESET();
+    }
+    else if(pGPIOx == GPIOC)
+    {
+        GPIOC_REG_RESET();
+    }
+    else if(pGPIOx == GPIOD)
+    {
+        GPIOD_REG_RESET();
+    }
+    else if(pGPIOx == GPIOE)
+    {
+        GPIOE_REG_RESET();
+    }
+    else if(pGPIOx == GPIOF)
+    {
+        GPIOF_REG_RESET();
+    }
+    else if(pGPIOx == GPIOG)
+    {
+        GPIOG_REG_RESET();
+    }
+    else if(pGPIOx == GPIOH)
+    {
+        GPIOH_REG_RESET();
+    }
+    else if(pGPIOx == GPIOI)
+    {
+        GPIOI_REG_RESET();
+    }
+	else if(pGPIOx == GPIOJ)
+    {
+        GPIOJ_REG_RESET();
+    }
+    else if(pGPIOx == GPIOK)
+    {
+        GPIOK_REG_RESET();
+    }
+}
+
+uint8_t GPIO_ReadFromInputPin(GPIO_RegDef_t *pGPIOx,
+                              uint8_t PinNumber)
+{
+    uint8_t value;
+
+    value = (uint8_t)((pGPIOx->IDR >> PinNumber) & 0x00000001);
+
+    return value;
+}
+
+uint16_t GPIO_ReadFromInputPort(GPIO_RegDef_t *pGPIOx)
+{
+    uint16_t value;
+
+    value = (uint16_t)pGPIOx->IDR;
+
+    return value;
+}
+
+void GPIO_WriteToOutputPin(GPIO_RegDef_t *pGPIOx,uint8_t PinNumber,uint8_t Value)
+{
+    if(Value == GPIO_PIN_SET)
+    {
+        pGPIOx->ODR |= (1 << PinNumber);
+    }
+    else
+    {
+        pGPIOx->ODR &= ~(1 << PinNumber);
+    }
+}
+
+void GPIO_WriteToOutputPort(GPIO_RegDef_t *pGPIOx,uint16_t Value)
+{
+    pGPIOx->ODR = Value;
+}
+
+void GPIO_ToggleOutputPin(GPIO_RegDef_t *pGPIOx,uint8_t PinNumber)
+{
+    pGPIOx->ODR ^= (1 << PinNumber);
+}
+
+void GPIO_IRQInterruptConfig(uint8_t IRQNumber,uint8_t EnorDi)
+{
+    if(EnorDi == ENABLE)
+    {
+        if(IRQNumber < 32)
+        {
+            *NVIC_ISER0 |= (1 << IRQNumber);
+        }
+        else if(IRQNumber >= 32 && IRQNumber < 64)
+        {
+            *NVIC_ISER1 |= (1 << (IRQNumber % 32));
+        }
+        else if(IRQNumber >= 64 && IRQNumber < 96)
+        {
+            *NVIC_ISER2 |= (1 << (IRQNumber % 32));
+        }
+        else if(IRQNumber >= 96 && IRQNumber < 128)
+        {
+            *NVIC_ISER3 |= (1 << (IRQNumber % 32));
+        }
+    }
+    else
+    {
+        if(IRQNumber < 32)
+        {
+            *NVIC_ICER0 |= (1 << IRQNumber);
+        }
+        else if(IRQNumber >= 32 && IRQNumber < 64)
+        {
+            *NVIC_ICER1 |= (1 << (IRQNumber % 32));
+        }
+        else if(IRQNumber >= 64 && IRQNumber < 96)
+        {
+            *NVIC_ICER2 |= (1 << (IRQNumber % 32));
+        }
+        else if(IRQNumber >= 96 && IRQNumber < 128)
+        {
+            *NVIC_ICER3 |= (1 << (IRQNumber % 32));
+        }
+    }
+}
+
+void GPIO_IRQPriorityConfig(uint8_t IRQNumber,uint32_t IRQPriority)
+{
+    uint8_t iprx;
+    uint8_t iprx_section;
+    uint8_t shift_amount;
+
+    iprx = IRQNumber / 4;
+
+    iprx_section = IRQNumber % 4;
+
+    shift_amount = (8 * iprx_section) + 4;
+
+    *(NVIC_PR_BASE_ADDR + iprx) &=
+        ~(0xFF << shift_amount);
+
+    *(NVIC_PR_BASE_ADDR + iprx) |=
+        (IRQPriority << shift_amount);
+}
+
+void GPIO_IRQHandling(uint8_t PinNumber)
+{
+    /*
+     * Clear the EXTI pending bit by writing 1.
+     */
+    if(EXTI->PR & (1 << PinNumber))
+    {
+        EXTI->PR |= (1 << PinNumber);
+    }
+}
+
