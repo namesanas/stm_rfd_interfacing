@@ -57,8 +57,22 @@ typedef struct
     uint8_t frameReady;
     uint8_t frameError;
 
+    JRD100_RXState_t rxState;
+
 } JRD100_Handle_t;
 
+typedef enum
+{
+    JRD100_RX_WAIT_HEADER = 0,
+    JRD100_RX_WAIT_TYPE,
+    JRD100_RX_WAIT_COMMAND,
+    JRD100_RX_WAIT_LENGTH_MSB,
+    JRD100_RX_WAIT_LENGTH_LSB,
+    JRD100_RX_WAIT_PARAMETER,
+    JRD100_RX_WAIT_CHECKSUM,
+    JRD100_RX_WAIT_END
+
+} JRD100_RXState_t;
 
 /*
  * Driver APIs
@@ -84,5 +98,13 @@ uint8_t JRD100_GetReaderInfo(JRD100_Handle_t *pJRD100Handle,
                              uint8_t infoType);
 
 uint8_t JRD100_SinglePolling(JRD100_Handle_t *pJRD100Handle);
+
+void JRD100_ProcessByte(JRD100_Handle_t *pJRD100Handle,uint8_t receivedByte);
+
+uint8_t JRD100_IsFrameReady(JRD100_Handle_t *pJRD100Handle);
+
+void JRD100_ClearFrame(JRD100_Handle_t *pJRD100Handle);
+
+uint8_t JRD100_ValidateFrame(JRD100_Handle_t *pJRD100Handle);
 
 #endif /* INC_JRD100_DRIVER_H_ */
