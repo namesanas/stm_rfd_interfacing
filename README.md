@@ -3,7 +3,7 @@ Project-: stm32f429 + JRD-100 RFID prototype
 Development timeline-
 
 Day 1-
-STM32F429 project setup and MCU-specific configuration
+STM32F429 project setup and MCU-specific configurationn/
 Day 2- 
 GPIO and peripheral driver development
 Day 3-
