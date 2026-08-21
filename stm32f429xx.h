@@ -1,4 +1,14 @@
 /*
+ * stm32f429xx..h
+ *
+ *  Created on: 21-Aug-2026
+ *      Author: Identium
+ */
+
+#ifndef INC_STM32F429XX_H_
+#define INC_STM32F429XX_H_
+
+/*
  * stm32f429xx.h
  *
  *  Created on: 20-Aug-2026
@@ -7,10 +17,7 @@
 
 //1. Includes / header guard
 
-#ifndef INC_STM32F429XX_H_
-#define INC_STM32F429XX_H_
 
-//2. Processor-specific macros
 
 #include <stdint.h>
 #include <stddef.h>
@@ -85,13 +92,13 @@
 
 #define PERIPH_BASE        0x40000000U
 
-#define APB1PERIPH_BASE    PERIPH_BASE
-#define APB2PERIPH_BASE    0x40010000U
+#define APB1PERIPH_BASEADDR    PERIPH_BASE
+#define APB2PERIPH_BASEADDR    0x40010000U
 
-#define AHB1PERIPH_BASE    0x40020000U
-#define AHB2PERIPH_BASE    0x50000000U
+#define AHB1PERIPH_BASEADDR    0x40020000U
+#define AHB2PERIPH_BASEADDR    0x50000000U
 
-#define RCC_BASEADDR       (AHB1PERIPH_BASE + 0x3800U)
+#define RCC_BASEADDR       (AHB1PERIPH_BASEADDR + 0x3800U)
 
 
 
@@ -115,17 +122,17 @@ typedef struct
 
 //gpio base address
 
-#define GPIOA_BASEADDR       (AHB1PERIPH_BASE + 0x0000U)
-#define GPIOB_BASEADDR       (AHB1PERIPH_BASE + 0x0400U)
-#define GPIOC_BASEADDR       (AHB1PERIPH_BASE + 0x0800U)
-#define GPIOD_BASEADDR       (AHB1PERIPH_BASE + 0x0C00U)
-#define GPIOE_BASEADDR       (AHB1PERIPH_BASE + 0x1000U)
-#define GPIOF_BASEADDR       (AHB1PERIPH_BASE + 0x1400U)
-#define GPIOG_BASEADDR       (AHB1PERIPH_BASE + 0x1800U)
-#define GPIOH_BASEADDR       (AHB1PERIPH_BASE + 0x1C00U)
-#define GPIOI_BASEADDR       (AHB1PERIPH_BASE + 0x2000U)
-#define GPIOJ_BASEADDR       (AHB1PERIPH_BASE + 0x2400U)
-#define GPIOK_BASEADDR       (AHB1PERIPH_BASE + 0x2800U)
+#define GPIOA_BASEADDR       (AHB1PERIPH_BASEADDR + 0x0000U)
+#define GPIOB_BASEADDR       (AHB1PERIPH_BASEADDR + 0x0400U)
+#define GPIOC_BASEADDR       (AHB1PERIPH_BASEADDR + 0x0800U)
+#define GPIOD_BASEADDR       (AHB1PERIPH_BASEADDR + 0x0C00U)
+#define GPIOE_BASEADDR       (AHB1PERIPH_BASEADDR + 0x1000U)
+#define GPIOF_BASEADDR       (AHB1PERIPH_BASEADDR + 0x1400U)
+#define GPIOG_BASEADDR       (AHB1PERIPH_BASEADDR + 0x1800U)
+#define GPIOH_BASEADDR       (AHB1PERIPH_BASEADDR + 0x1C00U)
+#define GPIOI_BASEADDR       (AHB1PERIPH_BASEADDR + 0x2000U)
+#define GPIOJ_BASEADDR       (AHB1PERIPH_BASEADDR + 0x2400U)
+#define GPIOK_BASEADDR       (AHB1PERIPH_BASEADDR + 0x2800U)
 
 //peripheral pointers
 
@@ -597,5 +604,11 @@ typedef struct
 #define GPIO_PIN_RESET			RESET
 #define FLAG_RESET				RESET
 #define FLAG_SET				SET
+
+#include "stm32f429xx_driver_gpio.h"
+#include "stm32f429xx_driver_uart.h"
+#include "stm32f429xx_driver_rcc.h"
+
+
 
 #endif /* INC_STM32F429XX_H_ */
