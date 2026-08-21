@@ -1,4 +1,14 @@
-/configuaration structure for USARTx peripheral
+/*
+ * stm32f429xx_driver_uart.h
+ *
+ *  Created on: 21-Aug-2026
+ *      Author: Identium
+ */
+
+#ifndef INC_STM32F429XX_DRIVER_UART_H_
+#define INC_STM32F429XX_DRIVER_UART_H_
+
+#include "stm32f429xx.h"
 
 /*
  * Configuration structure for USARTx peripheral
@@ -164,3 +174,6 @@ void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEven
 
 /* Baud-rate configuration */
 void USART_SetBaudRate(USART_RegDef_t *pUSARTx,uint32_t BaudRate);
+
+
+#endif /* INC_STM32F429XX_DRIVER_UART_H_ */
