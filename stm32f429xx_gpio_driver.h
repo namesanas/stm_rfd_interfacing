@@ -1,12 +1,20 @@
 /*
+ * stm32f429xx_driver_gpio.h
+ *
+ *  Created on: 21-Aug-2026
+ *      Author: Identium
+ */
+
+#ifndef INC_STM32F429XX_DRIVER_GPIO_H_
+#define INC_STM32F429XX_DRIVER_GPIO_H_
+
+/*
  * stm32f429xx_gpio_driver.h
  *
  *  Created on: 20-Aug-2026
  *      Author: Identium
  */
 
-#ifndef INC_STM32F429XX_GPIO_DRIVER_H_
-#define INC_STM32F429XX_GPIO_DRIVER_H_
 
 #include "stm32f429xx.h"
 
@@ -110,6 +118,16 @@ typedef struct
 #define GPIO_AF14           14
 #define GPIO_AF15           15
 
+#define GPIO_EXTI_PORTA      0
+#define GPIO_EXTI_PORTB      1
+#define GPIO_EXTI_PORTC      2
+#define GPIO_EXTI_PORTD      3
+#define GPIO_EXTI_PORTE      4
+#define GPIO_EXTI_PORTF      5
+#define GPIO_EXTI_PORTG      6
+#define GPIO_EXTI_PORTH      7
+#define GPIO_EXTI_PORTI      8
+
 //                      APIs supported by this driver
 
 //peripheral clock setup
@@ -125,6 +143,8 @@ uint8_t GPIO_ReadFromInputPin(GPIO_RegDef_t *pGPIOx, uint8_t PinNumber);
 uint16_t GPIO_ReadFromInputPort(GPIO_RegDef_t *pGPIOx);
 void GPIO_WriteToOutputPin(GPIO_RegDef_t *pGPIOx, uint8_t PinNumber, uint8_t Value);
 void GPIO_WriteToOutputPort(GPIO_RegDef_t *pGPIOx, uint16_t Value);
-void GPIO_ToggleOutputPin(GPIO_RegDef_t *pGPIOx, uint8_t PinNumber);
+void GPIO_ToggleOutputPin(GPIO_RegDef_t *pGPIOx,uint8_t PinNumber);
 
-void GPIO_IRQConfig(uint8_t IRQNumber, uint8_t E
+void GPIO_IRQInterruptConfig(uint8_t IRQNumber,uint8_t EnorDi);
+
+#endif /* INC_STM32F429XX_DRIVER_GPIO_H_ */
