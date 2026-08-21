@@ -1,3 +1,7 @@
+
+#include "stm32f429xx.h"
+#include "stm32f429xx_driver_gpio.h"
+
 void GPIO_PeriClockControl(GPIO_RegDef_t *pGPIOx, uint8_t EnorDi)
 {
     if(EnorDi == ENABLE)
@@ -244,7 +248,7 @@ void GPIO_Init(GPIO_Handle_t *pGPIOHandle)
      * Configure pull-up / pull-down
      */
 
-    temp = pGPIOHandle->GPIO_PinConfig.GPIO_PinPuPdControl
+    temp = pGPIOHandle->GPIO_PinConfig.GPIO_PuPdControl
            << (2 * pGPIOHandle->GPIO_PinConfig.GPIO_PinNumber);
 
     pGPIOHandle->pGPIOx->PUPDR &= ~(0x3 <<
