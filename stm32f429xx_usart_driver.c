@@ -1,3 +1,6 @@
+#include "stm32f429xx.h"
+#include "stm32f429xx_driver_uart.h"
+
 void USART_PeriClockControl(USART_RegDef_t *pUSARTx,
                             uint8_t EnorDi)
 {
