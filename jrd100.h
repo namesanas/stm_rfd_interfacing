@@ -1,9 +1,16 @@
-#ifndef INC_JRD100_DRIVER_H_
-#define INC_JRD100_DRIVER_H_
+/*
+ * jrd100.h
+ *
+ *  Created on: 22-Aug-2026
+ *      Author: Identium
+ */
+
+#ifndef INC_JRD100_H_
+#define INC_JRD100_H_
 
 #include <stdint.h>
 #include "stm32f429xx.h"
-#include "stm32f429xx_usart_driver.h"
+#include "stm32f429xx_driver_uart.h"
 
 
 /*
@@ -45,6 +52,19 @@
  * JRD-100 Driver Handle
  */
 
+typedef enum
+{
+    JRD100_RX_WAIT_HEADER = 0,
+    JRD100_RX_WAIT_TYPE,
+    JRD100_RX_WAIT_COMMAND,
+    JRD100_RX_WAIT_LENGTH_MSB,
+    JRD100_RX_WAIT_LENGTH_LSB,
+    JRD100_RX_WAIT_PARAMETER,
+    JRD100_RX_WAIT_CHECKSUM,
+    JRD100_RX_WAIT_END
+
+} JRD100_RXState_t;
+
 typedef struct
 {
     USART_Handle_t *pUSARTHandle;
@@ -61,18 +81,6 @@ typedef struct
 
 } JRD100_Handle_t;
 
-typedef enum
-{
-    JRD100_RX_WAIT_HEADER = 0,
-    JRD100_RX_WAIT_TYPE,
-    JRD100_RX_WAIT_COMMAND,
-    JRD100_RX_WAIT_LENGTH_MSB,
-    JRD100_RX_WAIT_LENGTH_LSB,
-    JRD100_RX_WAIT_PARAMETER,
-    JRD100_RX_WAIT_CHECKSUM,
-    JRD100_RX_WAIT_END
-
-} JRD100_RXState_t;
 
 /*
  * Driver APIs
@@ -107,4 +115,7 @@ void JRD100_ClearFrame(JRD100_Handle_t *pJRD100Handle);
 
 uint8_t JRD100_ValidateFrame(JRD100_Handle_t *pJRD100Handle);
 
-#endif /* INC_JRD100_DRIVER_H_ */
+
+
+#endif /* INC_JRD100_H_ */
+
