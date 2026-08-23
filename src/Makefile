@@ -18,7 +18,7 @@ LDFLAGS = $(MCU_FLAGS) -T ../STM32F429ZITX_FLASH.ld -nostdlib -Wl,--gc-sections 
 SRCS_C  = $(wildcard *.c)
 SRCS_C += ../Drivers/src/stm32f429xx_driver_rcc.c
 SRCS_C += ../Drivers/src/stm32f429xx_driver_gpio.c
-SRCS_C += ../Drivers/src/stm32f429xx_driver_usart.c
+SRCS_C += ../Drivers/src/stm32f429xx_driver_uart.c
 
 # If startup file is also in the parent folder, add ../ here too
 SRCS_S  = startup_stm32f429xx.s
