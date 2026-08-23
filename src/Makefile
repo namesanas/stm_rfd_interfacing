@@ -5,7 +5,7 @@ OBJCOPY = arm-none-eabi-objcopy
 SIZE    = arm-none-eabi-size
  
 # 1. Include paths (Keep the -I flag)
-INCLUDES = -I"Drivers/Inc"
+INCLUDES = -I"stm_rfd_interfacing/Drivers/Inc"
 
 MCU_FLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
  
