@@ -6,7 +6,7 @@ SIZE    = arm-none-eabi-size
  
 # 1. FIXED: Added ../ to go up one folder to reach Drivers/Inc
 INCLUDES = -I"../Drivers/Inc"
-
+INCLUDES = -I"../jrd100"
 MCU_FLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
  
 CFLAGS  = $(MCU_FLAGS) -Wall -O0 -g -std=gnu11 -ffunction-sections -fdata-sections
