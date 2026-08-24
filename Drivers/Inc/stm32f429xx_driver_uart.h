@@ -143,6 +143,10 @@ typedef struct
 #define USART_EVENT_RX_CMPLT      1
 #define USART_EVENT_IDLE          2
 #define USART_EVENT_CTS           3
+#define USART_EVENT_PE         4
+#define USART_EVENT_FE         5
+#define USART_EVENT_NE         6
+#define USART_EVENT_ORE        7
 
 /* Peripheral clock control */
 void USART_PeriClockControl(USART_RegDef_t *pUSARTx,uint8_t EnorDi);
