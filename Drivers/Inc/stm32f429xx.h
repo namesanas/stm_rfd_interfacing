@@ -36,7 +36,7 @@
 
 #define NVIC_PR_BASE_ADDR   ((__vo uint32_t*)0xE000E400)
 
-#define NO_PR_BIT_IMPLEMENTED  4
+#define NO_PR_BITS_IMPLEMENTED  4
 
 #define NVIC_IRQ_PRI0       0
 #define NVIC_IRQ_PRI1       1
@@ -497,6 +497,17 @@ typedef struct
 #define USART_CR3_CTSE      9
 #define USART_CR3_CTSIE     10
 
+#define IRQ_NO_USART1    37
+#define IRQ_NO_USART2    38
+#define IRQ_NO_USART3    39
+#define IRQ_NO_UART4     52
+#define IRQ_NO_UART5     53
+#define IRQ_NO_USART6    71
+#define IRQ_NO_UART7     82
+#define IRQ_NO_UART8     83
+
+
+
 
 
 //9. RCC register definition
@@ -608,6 +619,10 @@ typedef struct
 #include "stm32f429xx_driver_gpio.h"
 #include "stm32f429xx_driver_uart.h"
 #include "stm32f429xx_driver_rcc.h"
+
+
+
+
 
 
 
