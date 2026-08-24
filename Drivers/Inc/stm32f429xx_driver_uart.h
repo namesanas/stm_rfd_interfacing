@@ -40,12 +40,20 @@ typedef struct
 	uint8_t			RxBusyState;
 }USART_Handle_t;
 
+#define USART_READY       0
+#define USART_BUSY_IN_TX  1
+#define USART_BUSY_IN_RX  2
+
+
 /*
  * @USART_MODE
  */
 #define USART_MODE_ONLY_TX        0
 #define USART_MODE_ONLY_RX        1
 #define USART_MODE_TXRX           2
+
+#define USART_READY 0
+#define USART_BUSY  1
 
 
 /*
