@@ -1,5 +1,5 @@
 #include "stm32f429xx.h"
-#include "stm32f429xx_driver_uart.h"
+#include "stm32f429xx_drivers_uart.h"
 
 void USART_PeriClockControl(USART_RegDef_t *pUSARTx,
                             uint8_t EnorDi)
@@ -350,28 +350,202 @@ void USART_ReceiveData(USART_Handle_t *pUSARTHandle,uint8_t *pRxBuffer,uint32_t 
 }
 
 uint8_t USART_SendDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pTxBuffer,uint32_t Len)
+
 {
-	 uint8_t state;
+    if(pUSARTHandle->TxBusyState == USART_BUSY_IN_TX)
+    {
+        return USART_BUSY_IN_TX;
+    }
 
-	    if(pUSARTHandle->RxBusyState == USART_BUSY_IN_RX)
-	    {
-	        return USART_HANDLE_BUSY;
-	    }
+    /*
+     * Save TX buffer.
+     */
+    pUSARTHandle->pTxBuffer = pTxBuffer;
 
-	    pUSARTHandle->pRxBuffer = pRxBuffer;
-	    pUSARTHandle->RxLen = Len;
+    /*
+     * Save length.
+     */
+    pUSARTHandle->TxLen = Len;
 
-	    pUSARTHandle->RxBusyState = USART_BUSY_IN_RX;
+    /*
+     * Mark TX busy.
+     */
+    pUSARTHandle->TxBusyState = USART_BUSY_IN_TX;
 
-	    /*
-	     * Enable RXNE interrupt.
-	     */
-	    pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_RXNE);
+    /*
+     * Enable TXE interrupt.
+     */
+    pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_TXE);
 
-	    state = pUSARTHandle->RxBusyState;
-
-	    return state;
+    return USART_BUSY_IN_TX;
 }
+
+uint8_t USART_ReceiveDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pRxBuffer,uint32_t Len)
+{
+    uint8_t state = pUSARTHandle->RxBusyState;
+
+    /*
+     * Don't start another reception while one is active.
+     */
+    if(state != USART_BUSY_IN_RX)
+    {
+        pUSARTHandle->pRxBuffer = pRxBuffer;
+        pUSARTHandle->RxLen = Len;
+
+        pUSARTHandle->RxBusyState =
+            USART_BUSY_IN_RX;
+
+        /*
+         * Enable RXNE interrupt.
+         */
+        pUSARTHandle->pUSARTx->CR1 |=
+            (1 << USART_IRQ_RXNE);
+    }
+
+    return state;
+}
+
+void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
+{
+    uint8_t txe_status;
+    uint8_t txeie_status;
+
+    uint8_t rxne_status;
+    uint8_t rxneie_status;
+
+
+    /*
+     * ========================================================
+     * TXE INTERRUPT
+     * ========================================================
+     */
+
+    txe_status = USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_TXE);
+
+    txeie_status = (pUSARTHandle->pUSARTx->CR1 & (1 << USART_IRQ_TXE)) >> USART_IRQ_TXE;
+
+
+    if(txe_status && txeie_status)
+    {
+        /*
+         * Put next byte into DR.
+         */
+        pUSARTHandle->pUSARTx->DR = *(pUSARTHandle->pTxBuffer);
+
+        /*
+         * Move to next byte.
+         */
+        pUSARTHandle->pTxBuffer++;
+
+        /*
+         * One byte transmitted.
+         */
+        pUSARTHandle->TxLen--;
+
+        /*
+         * All bytes transmitted to DR.
+         */
+        if(pUSARTHandle->TxLen == 0)
+        {
+            /*
+             * TXE interrupt is no longer needed.
+             */
+            pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_TXE);
+
+            /*
+             * Enable TC interrupt.
+             *
+             * TC means the final byte has actually
+             * left the USART shift register.
+             */
+            pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_TC);
+        }
+    }
+
+
+    /*
+     * ========================================================
+     * TC INTERRUPT
+     * ========================================================
+     */
+
+    if(USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_TC) && (pUSARTHandle->pUSARTx->CR1 &(1 << USART_IRQ_TC)))
+    {
+        /*
+         * Transmission is completely finished.
+         */
+
+        pUSARTHandle->TxBusyState = USART_READY;
+
+        /*
+         * Disable TC interrupt.
+         */
+        pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_TC);
+
+        /*
+         * Notify application.
+         */
+        USART_ApplicationEventCallback( pUSARTHandle,USART_EVENT_TX_CMPLT);
+    }
+
+
+    /*
+     * ========================================================
+     * RXNE INTERRUPT
+     * ========================================================
+     */
+
+    rxne_status = USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_RXNE);
+
+    rxneie_status = (pUSARTHandle->pUSARTx->CR1 & (1 << USART_IRQ_RXNE)) >> USART_IRQ_RXNE;
+
+
+    if(rxne_status && rxneie_status)
+    {
+        /*
+         * Read received byte.
+         */
+        *(pUSARTHandle->pRxBuffer) = (uint8_t)(pUSARTHandle->pUSARTx->DR & 0xFF );
+
+        /*
+         * Advance RX buffer.
+         */
+        pUSARTHandle->pRxBuffer++;
+
+        /*
+         * One byte received.
+         */
+        pUSARTHandle->RxLen--;
+
+        /*
+         * Reception complete?
+         */
+        if(pUSARTHandle->RxLen == 0)
+        {
+            /*
+             * Mark RX as ready.
+             */
+            pUSARTHandle->RxBusyState = USART_READY;
+
+            /*
+             * Disable RXNE interrupt.
+             */
+            pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_RXNE);
+
+            /*
+             * Notify application.
+             */
+            USART_ApplicationEventCallback(pUSARTHandle,USART_EVENT_RX_CMPLT);
+        }
+    }
+}
+
+void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent)
+{
+    (void)pUSARTHandle;
+    (void)AppEvent;
+}
+
 
 void USART_SetBaudRate(USART_RegDef_t *pUSARTx,uint32_t BaudRate)
 {
