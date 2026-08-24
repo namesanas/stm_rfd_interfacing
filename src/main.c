@@ -2,8 +2,8 @@
 #include <stdio.h>
 
 #include "stm32f429xx.h"
-#include "stm32f429xx_driver_gpio.h"
-#include "stm32f429xx_driver_uart.h"
+#include "stm32f429xx_drivers_gpio.h"
+#include "stm32f429xx_drivers_uart.h"
 #include "jrd100.h"
 
 extern void initialise_monitor_handles(void);
@@ -188,6 +188,7 @@ static void USART3_Init(void)
 }
 
 
+
 /*
  * ============================================================
  * Small delay
@@ -277,6 +278,10 @@ int main(void)
 
     USART3_Init();
 
+    USART_IRQPriorityConfig(IRQ_NO_USART3,5);
+
+    USART_IRQInterruptConfig(IRQ_NO_USART3,ENABLE);
+
 
     /*
      * --------------------------------------------------------
@@ -286,10 +291,7 @@ int main(void)
 
     printf("Initializing JRD-100 driver...\r\n");
 
-    JRD100_Init(
-        &jrd100,
-        &usart3
-    );
+    JRD100_Init(&jrd100,&usart3);
 
 
     printf("Initialization complete.\r\n");
@@ -321,9 +323,7 @@ int main(void)
     printf("\r\n");
     printf("Sending Get Reader Hardware Information...\r\n");
 
-    if(JRD100_GetReaderInfo(
-            &jrd100,
-            0x00) == 0)
+    if(JRD100_GetReaderInfo(&jrd100,0x00) == 0)
     {
        printf("ERROR: JRD-100 command transmission failed.\r\n");
 
@@ -356,16 +356,9 @@ int main(void)
 
     while(!JRD100_IsFrameReady(&jrd100))
     {
-        USART_ReceiveData(
-            &usart3,
-            &receivedByte,
-            1
-        );
+        USART_ReceiveData(&usart3,&receivedByte,1);
 
-        JRD100_ProcessByte(
-            &jrd100,
-            receivedByte
-        );
+        JRD100_ProcessByte(&jrd100,receivedByte);
     }
 
     printf("\r\n");
@@ -378,9 +371,7 @@ int main(void)
      * ========================================================
      */
 
-    frameValid = JRD100_ValidateFrame(
-        &jrd100
-    );
+    frameValid = JRD100_ValidateFrame(&jrd100);
 
 
     if(frameValid)
@@ -391,16 +382,14 @@ int main(void)
         printf("========================================\r\n");
 
 
-        printf("Frame length = %u\r\n",
-               jrd100.rxIndex);
+        printf("Frame length = %u\r\n",jrd100.rxIndex);
 
 
         printf("Raw frame: ");
 
         for(i = 0; i < jrd100.rxIndex; i++)
         {
-            printf("%02X ",
-                   jrd100.rxBuffer[i]);
+            printf("%02X ",jrd100.rxBuffer[i]);
         }
 
         printf("\r\n");
@@ -431,8 +420,7 @@ int main(void)
 
         for(i = 0; i < jrd100.rxIndex; i++)
         {
-            printf("%02X ",
-                   jrd100.rxBuffer[i]);
+            printf("%02X ",jrd100.rxBuffer[i]);
         }
 
         printf("\r\n");
@@ -442,5 +430,10 @@ int main(void)
         {
         }
     }
+}
+
+void USART3_IRQHandler(void)
+{
+    USART_IRQHandling(&usart3);
 }
 
