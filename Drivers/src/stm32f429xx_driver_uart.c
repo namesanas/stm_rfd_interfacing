@@ -191,6 +191,70 @@ uint8_t USART_GetFlagStatus(USART_RegDef_t *pUSARTx,
     return FLAG_RESET;
 }
 
+void USART_IRQInterruptConfig(uint8_t IRQNumber,uint8_t EnorDi)
+{
+   if(EnorDi == ENABLE)
+	{
+		if(IRQNumber <= 31)
+		{
+			*NVIC_ISER0 |= (1 << IRQNumber);
+		}
+		else if(IRQNumber > 31 && IRQNumber < 64)
+		{
+			*NVIC_ISER1 |= (1 << (IRQNumber % 32));
+		}
+		else if(IRQNumber >= 64 && IRQNumber < 96)
+		{
+			*NVIC_ISER2 |= (1 << (IRQNumber % 64));
+		}
+	}
+	else
+	{
+		if(IRQNumber <= 31)
+		{
+			*NVIC_ICER0 |= (1 << IRQNumber);
+		}
+		else if(IRQNumber > 31 && IRQNumber < 64)
+		{
+			*NVIC_ICER1 |= (1 << (IRQNumber % 32));
+		}
+		else if(IRQNumber >= 64 && IRQNumber < 96)
+		{
+			*NVIC_ICER2 |= (1 << (IRQNumber % 64));
+		}
+	}
+}
+
+
+void USART_IRQPriorityConfig(uint8_t IRQNumber,uint32_t IRQPriority)
+{
+	 uint8_t iprx;
+	    uint8_t section;
+	    uint8_t shift_amount;
+
+	    /*
+	     * IRQ priority register index
+	     */
+	    iprx = IRQNumber / 4;
+
+	    /*
+	     * Which 8-bit priority field?
+	     */
+	    section = IRQNumber % 4;
+
+	    /*
+	     * STM32F4 implements 4 priority bits.
+	     */
+	    shift_amount =
+	        (8 * section) + (8 - NO_PR_BITS_IMPLEMENTED);
+
+	    NVIC_PR_BASE_ADDR[iprx] &=
+	        ~(0xFF << shift_amount);
+
+	    NVIC_PR_BASE_ADDR[iprx] |=
+	        ((IRQPriority << shift_amount) & 0xFF);
+}
+
 void USART_SendData(USART_Handle_t *pUSARTHandle, uint8_t *pTxBuffer,uint32_t Len)
 {
     uint16_t *pData;
@@ -283,6 +347,30 @@ void USART_ReceiveData(USART_Handle_t *pUSARTHandle,uint8_t *pRxBuffer,uint32_t 
             pRxBuffer++;
         }
     }
+}
+
+uint8_t USART_SendDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pTxBuffer,uint32_t Len)
+{
+	 uint8_t state;
+
+	    if(pUSARTHandle->RxBusyState == USART_BUSY_IN_RX)
+	    {
+	        return USART_HANDLE_BUSY;
+	    }
+
+	    pUSARTHandle->pRxBuffer = pRxBuffer;
+	    pUSARTHandle->RxLen = Len;
+
+	    pUSARTHandle->RxBusyState = USART_BUSY_IN_RX;
+
+	    /*
+	     * Enable RXNE interrupt.
+	     */
+	    pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_RXNE);
+
+	    state = pUSARTHandle->RxBusyState;
+
+	    return state;
 }
 
 void USART_SetBaudRate(USART_RegDef_t *pUSARTx,uint32_t BaudRate)
