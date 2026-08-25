@@ -1,4 +1,4 @@
-#include "jrd100_driver.h"
+#include "jrd100.h"
 
 
 void JRD100_Init(JRD100_Handle_t *pJRD100Handle,
@@ -94,7 +94,7 @@ uint8_t JRD100_SendFrame(JRD100_Handle_t *pJRD100Handle,
         return 0;
     }
 
-    USART_SendData(
+    USART_SendDataIT(
         pJRD100Handle->pUSARTHandle,
         pFrame,
         frameLength
@@ -107,7 +107,7 @@ uint8_t JRD100_GetReaderInfo(JRD100_Handle_t *pJRD100Handle,
                              uint8_t infoType)
 {
     uint8_t parameter;
-    uint8_t frame[16];
+    static uint8_t frame[16];
 
     uint16_t frameLength;
 
