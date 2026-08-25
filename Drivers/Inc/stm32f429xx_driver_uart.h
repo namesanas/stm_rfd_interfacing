@@ -147,6 +147,7 @@ typedef struct
 #define USART_EVENT_FE         5
 #define USART_EVENT_NE         6
 #define USART_EVENT_ORE        7
+#define USART_EVENT_RX_BYTE 	8
 
 /* Peripheral clock control */
 void USART_PeriClockControl(USART_RegDef_t *pUSARTx,uint8_t EnorDi);
@@ -169,7 +170,7 @@ uint8_t USART_GetFlagStatus(USART_RegDef_t *pUSARTx,uint8_t StatusFlagName);
 /* Interrupt-based transmission */
 uint8_t USART_SendDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pTxBuffer,uint32_t Len);
 uint8_t USART_ReceiveDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pRxBuffer,uint32_t Len);
-
+uint8_t USART_ReceiveByteIT(USART_Handle_t *pUSARTHandle);
 
 /* IRQ configuration */
 void USART_IRQInterruptConfig(uint8_t IRQNumber,uint8_t EnorDi);
@@ -181,7 +182,7 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle);
 
 
 /* Application callback */
-void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent);
+void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent,uint8_t receivedByte);
 
 
 /* Baud-rate configuration */
@@ -189,3 +190,5 @@ void USART_SetBaudRate(USART_RegDef_t *pUSARTx,uint32_t BaudRate);
 
 
 #endif /* INC_STM32F429XX_DRIVER_UART_H_ */
+
+
