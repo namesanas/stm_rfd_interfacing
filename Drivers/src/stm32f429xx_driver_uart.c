@@ -1,5 +1,5 @@
 #include "stm32f429xx.h"
-#include "stm32f429xx_drivers_uart.h"
+#include "stm32f429xx_driver_uart.h"
 
 void USART_PeriClockControl(USART_RegDef_t *pUSARTx,
                             uint8_t EnorDi)
@@ -380,29 +380,63 @@ uint8_t USART_SendDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pTxBuffer,uint32_
     return USART_BUSY_IN_TX;
 }
 
-uint8_t USART_ReceiveDataIT(USART_Handle_t *pUSARTHandle,uint8_t *pRxBuffer,uint32_t Len)
+uint8_t USART_ReceiveDataIT(USART_Handle_t *pUSARTHandle, uint8_t *pRxBuffer, uint32_t Len)
 {
     uint8_t state = pUSARTHandle->RxBusyState;
 
-    /*
-     * Don't start another reception while one is active.
-     */
     if(state != USART_BUSY_IN_RX)
     {
         pUSARTHandle->pRxBuffer = pRxBuffer;
         pUSARTHandle->RxLen = Len;
+        pUSARTHandle->RxBusyState = USART_BUSY_IN_RX;
 
-        pUSARTHandle->RxBusyState =
-            USART_BUSY_IN_RX;
+        /* 1. Flush stale flags/bytes in SR and DR */
+        (void)pUSARTHandle->pUSARTx->SR;
+        (void)pUSARTHandle->pUSARTx->DR;
 
-        /*
-         * Enable RXNE interrupt.
-         */
-        pUSARTHandle->pUSARTx->CR1 |=
-            (1 << USART_IRQ_RXNE);
+        /* 2. Enable Error Interrupt (EIE) in CR3 so ORE/FE forces an IRQ trigger */
+        pUSARTHandle->pUSARTx->CR3 |= (1 << 0); // Bit 0 = EIE
+
+        /* 3. Enable RXNE interrupt in CR1 */
+        pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_RXNE);
     }
 
     return state;
+}
+
+uint8_t USART_ReceiveByteIT(
+    USART_Handle_t *pUSARTHandle)
+{
+    /*
+     * Enable RXNE interrupt.
+     */
+
+    pUSARTHandle->pUSARTx->CR1 |=
+        (1 << USART_IRQ_RXNE);
+
+
+    /*
+     * Enable USART error interrupt.
+     *
+     * This allows ORE/FE/NE to generate interrupts.
+     */
+
+    pUSARTHandle->pUSARTx->CR3 |=
+        (1 << 0);
+
+
+    /*
+     * We are NOT using a fixed RX buffer here.
+     */
+
+    pUSARTHandle->pRxBuffer = 0;
+
+    pUSARTHandle->RxLen = 0;
+
+    pUSARTHandle->RxBusyState = USART_READY;
+
+
+    return 1;
 }
 
 void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
@@ -413,6 +447,62 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
     uint8_t rxne_status;
     uint8_t rxneie_status;
 
+    /*
+     * ========================================================
+     * OVERRUN ERROR (ORE) HANDLING
+     * ========================================================
+     */
+
+    uint8_t ore_status =
+        USART_GetFlagStatus(
+            pUSARTHandle->pUSARTx,
+            USART_FLAG_ORE
+        );
+
+    uint8_t eie_status =
+        (pUSARTHandle->pUSARTx->CR3 & (1 << 0));
+
+
+    if(ore_status && eie_status)
+    {
+        /*
+         * Clear ORE:
+         *
+         * Read SR first
+         * Read DR second
+         */
+
+        (void)pUSARTHandle->pUSARTx->SR;
+        (void)pUSARTHandle->pUSARTx->DR;
+
+
+        /*
+         * Stop fixed-length RX operation if one is active.
+         */
+
+        pUSARTHandle->RxBusyState = USART_READY;
+
+        pUSARTHandle->pUSARTx->CR1 &=
+            ~(1 << USART_IRQ_RXNE);
+
+        pUSARTHandle->pUSARTx->CR3 &=
+            ~(1 << 0);
+
+
+        /*
+         * Notify application.
+         *
+         * No byte is associated with this event,
+         * so pass 0.
+         */
+
+        USART_ApplicationEventCallback(
+            pUSARTHandle,
+            USART_EVENT_ORE,
+            0
+        );
+    }
+
 
     /*
      * ========================================================
@@ -420,45 +510,56 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
      * ========================================================
      */
 
-    txe_status = USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_TXE);
+    txe_status =
+        USART_GetFlagStatus(
+            pUSARTHandle->pUSARTx,
+            USART_FLAG_TXE
+        );
 
-    txeie_status = (pUSARTHandle->pUSARTx->CR1 & (1 << USART_IRQ_TXE)) >> USART_IRQ_TXE;
+    txeie_status =
+        (pUSARTHandle->pUSARTx->CR1 &
+        (1 << USART_IRQ_TXE))
+        >> USART_IRQ_TXE;
 
 
     if(txe_status && txeie_status)
     {
         /*
-         * Put next byte into DR.
+         * Write next byte to DR.
          */
-        pUSARTHandle->pUSARTx->DR = *(pUSARTHandle->pTxBuffer);
 
-        /*
-         * Move to next byte.
-         */
+        pUSARTHandle->pUSARTx->DR =
+            *(pUSARTHandle->pTxBuffer);
+
+
         pUSARTHandle->pTxBuffer++;
 
-        /*
-         * One byte transmitted.
-         */
         pUSARTHandle->TxLen--;
 
+
         /*
-         * All bytes transmitted to DR.
+         * All bytes have entered the USART.
+         *
+         * Now wait for TC so we know the final bit
+         * has actually left the UART.
          */
+
         if(pUSARTHandle->TxLen == 0)
         {
             /*
-             * TXE interrupt is no longer needed.
+             * Disable TXE interrupt.
              */
-            pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_TXE);
+
+            pUSARTHandle->pUSARTx->CR1 &=
+                ~(1 << USART_IRQ_TXE);
+
 
             /*
              * Enable TC interrupt.
-             *
-             * TC means the final byte has actually
-             * left the USART shift register.
              */
-            pUSARTHandle->pUSARTx->CR1 |= (1 << USART_IRQ_TC);
+
+            pUSARTHandle->pUSARTx->CR1 |=
+                (1 << USART_IRQ_TC);
         }
     }
 
@@ -469,23 +570,38 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
      * ========================================================
      */
 
-    if(USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_TC) && (pUSARTHandle->pUSARTx->CR1 &(1 << USART_IRQ_TC)))
+    if(USART_GetFlagStatus(
+            pUSARTHandle->pUSARTx,
+            USART_FLAG_TC)
+       &&
+       (pUSARTHandle->pUSARTx->CR1 &
+        (1 << USART_IRQ_TC)))
     {
         /*
-         * Transmission is completely finished.
+         * TX is completely finished.
          */
 
-        pUSARTHandle->TxBusyState = USART_READY;
+        pUSARTHandle->TxBusyState =
+            USART_READY;
+
 
         /*
          * Disable TC interrupt.
          */
-        pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_TC);
+
+        pUSARTHandle->pUSARTx->CR1 &=
+            ~(1 << USART_IRQ_TC);
+
 
         /*
          * Notify application.
          */
-        USART_ApplicationEventCallback( pUSARTHandle,USART_EVENT_TX_CMPLT);
+
+        USART_ApplicationEventCallback(
+            pUSARTHandle,
+            USART_EVENT_TX_CMPLT,
+            0
+        );
     }
 
 
@@ -495,56 +611,88 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
      * ========================================================
      */
 
-    rxne_status = USART_GetFlagStatus(pUSARTHandle->pUSARTx,USART_FLAG_RXNE);
+    rxne_status =
+        USART_GetFlagStatus(
+            pUSARTHandle->pUSARTx,
+            USART_FLAG_RXNE
+        );
 
-    rxneie_status = (pUSARTHandle->pUSARTx->CR1 & (1 << USART_IRQ_RXNE)) >> USART_IRQ_RXNE;
+    rxneie_status =
+        (pUSARTHandle->pUSARTx->CR1 &
+        (1 << USART_IRQ_RXNE))
+        >> USART_IRQ_RXNE;
 
 
     if(rxne_status && rxneie_status)
     {
-        /*
-         * Read received byte.
-         */
-        *(pUSARTHandle->pRxBuffer) = (uint8_t)(pUSARTHandle->pUSARTx->DR & 0xFF );
+        uint8_t receivedByte;
+
 
         /*
-         * Advance RX buffer.
+         * Read the received byte ONCE from DR.
          */
-        pUSARTHandle->pRxBuffer++;
+
+        receivedByte =
+            (uint8_t)(pUSARTHandle->pUSARTx->DR & 0xFF);
+
 
         /*
-         * One byte received.
+         * --------------------------------------------------------
+         * NEW:
+         * Pass every received byte to the application.
+         *
+         * JRD100_ProcessByte() will receive this byte through
+         * USART_ApplicationEventCallback().
+         * --------------------------------------------------------
          */
-        pUSARTHandle->RxLen--;
+
+        USART_ApplicationEventCallback(
+            pUSARTHandle,
+            USART_EVENT_RX_BYTE,
+            receivedByte
+        );
+
 
         /*
-         * Reception complete?
+         * --------------------------------------------------------
+         * OLD FIXED-LENGTH RX LOGIC
+         *
+         * Keep this because our loopback test already proved
+         * that this part works.
+         * --------------------------------------------------------
          */
-        if(pUSARTHandle->RxLen == 0)
+
+        if(pUSARTHandle->RxBusyState ==
+           USART_BUSY_IN_RX)
         {
-            /*
-             * Mark RX as ready.
-             */
-            pUSARTHandle->RxBusyState = USART_READY;
+            *(pUSARTHandle->pRxBuffer) =
+                receivedByte;
 
-            /*
-             * Disable RXNE interrupt.
-             */
-            pUSARTHandle->pUSARTx->CR1 &= ~(1 << USART_IRQ_RXNE);
+            pUSARTHandle->pRxBuffer++;
 
-            /*
-             * Notify application.
-             */
-            USART_ApplicationEventCallback(pUSARTHandle,USART_EVENT_RX_CMPLT);
+            pUSARTHandle->RxLen--;
+
+
+            if(pUSARTHandle->RxLen == 0)
+            {
+                pUSARTHandle->RxBusyState =
+                    USART_READY;
+
+                pUSARTHandle->pUSARTx->CR1 &=
+                    ~(1 << USART_IRQ_RXNE);
+
+
+                USART_ApplicationEventCallback(
+                    pUSARTHandle,
+                    USART_EVENT_RX_CMPLT,
+                    0
+                );
+            }
         }
     }
+
 }
 
-void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent)
-{
-    (void)pUSARTHandle;
-    (void)AppEvent;
-}
 
 
 void USART_SetBaudRate(USART_RegDef_t *pUSARTx,uint32_t BaudRate)
