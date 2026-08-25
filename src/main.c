@@ -2,29 +2,31 @@
 #include <stdio.h>
 
 #include "stm32f429xx.h"
-#include "stm32f429xx_drivers_gpio.h"
-#include "stm32f429xx_drivers_uart.h"
+#include "stm32f429xx_driver_gpio.h"
+#include "stm32f429xx_driver_uart.h"
 #include "jrd100.h"
 
 extern void initialise_monitor_handles(void);
 
+
 /*
  * ============================================================
- * JRD-100 connections
+ * STM32F429ZI + JRD-100 REAL UART TEST
  *
- * PB0  -> JRD-100 EN
+ * USART3:
  *
- * PB10 -> USART3_TX -> JRD-100 RX
- * PB11 -> USART3_RX <- JRD-100 TX
+ * PB10 / USART3_TX  -> JRD-100 RX
+ * PB11 / USART3_RX  <- JRD-100 TX
+ * GND               <-> GND
  *
- * JRD-100 VCC -> external 5V
- * JRD-100 GND -> STM32 GND
  * ============================================================
  */
 
 
 /*
- * Global handles
+ * ============================================================
+ * GLOBAL HANDLES
+ * ============================================================
  */
 
 USART_Handle_t usart3;
@@ -34,44 +36,36 @@ JRD100_Handle_t jrd100;
 
 /*
  * ============================================================
- * JRD-100 Enable GPIO
+ * APPLICATION FLAGS
  * ============================================================
  */
 
-static void JRD100_EnablePin_Init(void)
-{
-    GPIO_Handle_t gpio_en;
-
-    gpio_en.pGPIOx = GPIOB;
-
-    gpio_en.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_0;
-    gpio_en.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
-    gpio_en.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_FAST;
-    gpio_en.GPIO_PinConfig.GPIO_PuPdControl = GPIO_NO_PUPD;
-    gpio_en.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
-
-    GPIO_Init(&gpio_en);
-}
-
-
-/*
- * Enable JRD-100
- *
- * EN is active HIGH.
- */
-
-static void JRD100_Enable(void)
-{
-    GPIO_WriteToOutputPin(GPIOB,GPIO_PIN_NO_0,GPIO_PIN_SET);
-}
+volatile uint8_t txComplete = 0;
+volatile uint8_t rxComplete = 0;
+volatile uint8_t rxError = 0;
 
 
 /*
  * ============================================================
- * USART3 GPIO initialization
+ * RX BUFFER
  *
- * PB10 = USART3_TX
- * PB11 = USART3_RX
+ * We are deliberately using the existing fixed-length
+ * USART_ReceiveDataIT() mechanism for this test.
+ *
+ * The buffer is intentionally large enough for this first
+ * experiment.
+ * ============================================================
+ */
+
+uint8_t rxBuffer[256];
+
+
+/*
+ * ============================================================
+ * USART3 GPIO INITIALIZATION
+ *
+ * PB10 -> USART3_TX -> JRD-100 RX
+ * PB11 -> USART3_RX <- JRD-100 TX
  *
  * AF7
  * ============================================================
@@ -79,43 +73,69 @@ static void JRD100_Enable(void)
 
 static void USART3_GPIO_Init(void)
 {
-    GPIO_Handle_t gpio_usart;
+    GPIO_Handle_t gpio;
 
 
     /*
-     * PB10 - USART3 TX
+     * --------------------------------------------------------
+     * PB10 -> USART3_TX
+     * --------------------------------------------------------
      */
 
-    gpio_usart.pGPIOx = GPIOB;
+    gpio.pGPIOx = GPIOB;
 
-    gpio_usart.GPIO_PinConfig.GPIO_PinNumber =GPIO_PIN_NO_10;
-    gpio_usart.GPIO_PinConfig.GPIO_PinMode =GPIO_MODE_ALTFN;
-    gpio_usart.GPIO_PinConfig.GPIO_PinSpeed =GPIO_SPEED_FAST;
-    gpio_usart.GPIO_PinConfig.GPIO_PuPdControl =GPIO_PIN_PU;
-    gpio_usart.GPIO_PinConfig.GPIO_PinOPType =GPIO_OP_TYPE_PP;
-    gpio_usart.GPIO_PinConfig.GPIO_PinAltFunMode =7;
+    gpio.GPIO_PinConfig.GPIO_PinNumber =
+        GPIO_PIN_NO_10;
 
-    GPIO_Init(&gpio_usart);
+    gpio.GPIO_PinConfig.GPIO_PinMode =
+        GPIO_MODE_ALTFN;
+
+    gpio.GPIO_PinConfig.GPIO_PinSpeed =
+        GPIO_SPEED_FAST;
+
+    gpio.GPIO_PinConfig.GPIO_PuPdControl =
+        GPIO_PIN_PU;
+
+    gpio.GPIO_PinConfig.GPIO_PinOPType =
+        GPIO_OP_TYPE_PP;
+
+    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
+        7;
+
+    GPIO_Init(&gpio);
 
 
     /*
-     * PB11 - USART3 RX
+     * --------------------------------------------------------
+     * PB11 -> USART3_RX
+     * --------------------------------------------------------
      */
 
-    gpio_usart.GPIO_PinConfig.GPIO_PinNumber =GPIO_PIN_NO_11;
-    gpio_usart.GPIO_PinConfig.GPIO_PinMode =GPIO_MODE_ALTFN;
-    gpio_usart.GPIO_PinConfig.GPIO_PinSpeed =GPIO_SPEED_FAST;
-    gpio_usart.GPIO_PinConfig.GPIO_PuPdControl =GPIO_PIN_PU;
-    gpio_usart.GPIO_PinConfig.GPIO_PinOPType =GPIO_OP_TYPE_PP;
-    gpio_usart.GPIO_PinConfig.GPIO_PinAltFunMode =7;
+    gpio.GPIO_PinConfig.GPIO_PinNumber =
+        GPIO_PIN_NO_11;
 
-    GPIO_Init(&gpio_usart);
+    gpio.GPIO_PinConfig.GPIO_PinMode =
+        GPIO_MODE_ALTFN;
+
+    gpio.GPIO_PinConfig.GPIO_PinSpeed =
+        GPIO_SPEED_FAST;
+
+    gpio.GPIO_PinConfig.GPIO_PuPdControl =
+        GPIO_PIN_PU;
+
+    gpio.GPIO_PinConfig.GPIO_PinOPType =
+        GPIO_OP_TYPE_PP;
+
+    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
+        7;
+
+    GPIO_Init(&gpio);
 }
 
 
 /*
  * ============================================================
- * USART3 initialization
+ * USART3 INITIALIZATION
  * ============================================================
  */
 
@@ -180,29 +200,122 @@ static void USART3_Init(void)
         USART_OVERSAMPLING_16;
 
 
-    /*
-     * Initialize USART3
-     */
-
     USART_Init(&usart3);
 }
 
 
-
 /*
  * ============================================================
- * Small delay
+ * USART3 IRQ HANDLER
  * ============================================================
  */
 
-static void delay(void)
+void USART3_IRQHandler(void)
 {
-    volatile uint32_t i;
+    USART_IRQHandling(&usart3);
+}
 
-    for(i = 0; i < 1000000U; i++)
+
+/*
+ * ============================================================
+ * USART APPLICATION EVENT CALLBACK
+ * ============================================================
+ *
+ * Every received byte is passed to the JRD-100 parser.
+ *
+ * IMPORTANT:
+ * Do not put printf() here.
+ * ============================================================
+ */
+
+void USART_ApplicationEventCallback(
+        USART_Handle_t *pUSARTHandle,
+        uint8_t AppEvent,
+        uint8_t receivedByte)
+{
+    (void)pUSARTHandle;
+
+
+    /*
+     * --------------------------------------------------------
+     * ONE BYTE RECEIVED
+     * --------------------------------------------------------
+     */
+
+    if(AppEvent == USART_EVENT_RX_BYTE)
     {
-        __asm volatile ("nop");
+        JRD100_ProcessByte(
+            &jrd100,
+            receivedByte
+        );
     }
+
+
+    /*
+     * --------------------------------------------------------
+     * TRANSMISSION COMPLETE
+     * --------------------------------------------------------
+     */
+
+    else if(AppEvent == USART_EVENT_TX_CMPLT)
+    {
+        txComplete = 1;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * FIXED-LENGTH RX COMPLETE
+     * --------------------------------------------------------
+     */
+
+    else if(AppEvent == USART_EVENT_RX_CMPLT)
+    {
+        rxComplete = 1;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * USART ERRORS
+     * --------------------------------------------------------
+     */
+
+    else if(AppEvent == USART_EVENT_ORE ||
+            AppEvent == USART_EVENT_FE  ||
+            AppEvent == USART_EVENT_NE  ||
+            AppEvent == USART_EVENT_PE)
+    {
+        rxError = 1;
+    }
+}
+
+
+/*
+ * ============================================================
+ * PRINT JRD-100 FRAME
+ * ============================================================
+ */
+
+static void PrintJRD100Frame(void)
+{
+    uint16_t i;
+
+    printf("\r\n");
+    printf("========================================\r\n");
+    printf("JRD-100 FRAME RECEIVED\r\n");
+    printf("========================================\r\n");
+
+    printf("Length: %u\r\n", jrd100.rxIndex);
+
+    printf("Frame:\r\n");
+
+    for(i = 0; i < jrd100.rxIndex; i++)
+    {
+        printf("%02X ", jrd100.rxBuffer[i]);
+    }
+
+    printf("\r\n");
 }
 
 
@@ -214,226 +327,259 @@ static void delay(void)
 
 int main(void)
 {
-	initialise_monitor_handles();
+    uint16_t i;
 
-    uint8_t receivedByte;
     uint8_t frameValid;
 
-    uint16_t i;
+
+    /*
+     * --------------------------------------------------------
+     * DEBUG CONSOLE
+     * --------------------------------------------------------
+     */
+
+    initialise_monitor_handles();
 
 
     printf("\r\n");
     printf("========================================\r\n");
-    printf("STM32F429ZI + JRD-100 TEST\r\n");
+    printf(" STM32F429ZI + JRD-100 TEST\r\n");
     printf("========================================\r\n");
 
 
     /*
      * --------------------------------------------------------
-     * 1. Configure JRD-100 EN
+     * 1. Initialize USART3 GPIO
      * --------------------------------------------------------
      */
-
-    printf("Initializing JRD-100 EN...\r\n");
-
-    JRD100_EnablePin_Init();
-
-
-    /*
-     * --------------------------------------------------------
-     * 2. Enable JRD-100
-     * --------------------------------------------------------
-     */
-
-    printf("Enabling JRD-100...\r\n");
-
-    JRD100_Enable();
-
-
-    /*
-     * Give reader time to start.
-     */
-
-    delay();
-
-
-    /*
-     * --------------------------------------------------------
-     * 3. Configure USART3 GPIO
-     * --------------------------------------------------------
-     */
-
-    printf("Initializing USART3 GPIO...\r\n");
 
     USART3_GPIO_Init();
 
 
     /*
      * --------------------------------------------------------
-     * 4. Configure USART3
+     * 2. Initialize USART3
      * --------------------------------------------------------
      */
-
-    printf("Initializing USART3...\r\n");
 
     USART3_Init();
 
-    USART_IRQPriorityConfig(IRQ_NO_USART3,5);
 
-    USART_IRQInterruptConfig(IRQ_NO_USART3,ENABLE);
+    /*
+     * --------------------------------------------------------
+     * 3. Initialize JRD-100 driver
+     * --------------------------------------------------------
+     */
+
+    JRD100_Init(
+        &jrd100,
+        &usart3
+    );
 
 
     /*
      * --------------------------------------------------------
-     * 5. Initialize JRD-100 driver
+     * 4. Configure USART3 IRQ priority
      * --------------------------------------------------------
      */
 
-    printf("Initializing JRD-100 driver...\r\n");
-
-    JRD100_Init(&jrd100,&usart3);
-
-
-    printf("Initialization complete.\r\n");
+    USART_IRQPriorityConfig(
+        IRQ_NO_USART3,
+        5
+    );
 
 
     /*
      * --------------------------------------------------------
-     * 6. Give JRD-100 additional startup time
+     * 5. Enable USART3 interrupt
      * --------------------------------------------------------
      */
 
-    delay();
+    USART_IRQInterruptConfig(
+        IRQ_NO_USART3,
+        ENABLE
+    );
 
 
     /*
-     * ========================================================
-     * TEST:
-     *
-     * Get Reader Hardware Information
-     *
-     * infoType = 0x00
-     *
-     * Expected TX:
-     *
-     * BB 00 03 00 01 00 04 7E
-     * ========================================================
+     * --------------------------------------------------------
+     * 6. Clear RX BUFFER
+     * --------------------------------------------------------
      */
 
-    printf("\r\n");
-    printf("Sending Get Reader Hardware Information...\r\n");
-
-    if(JRD100_GetReaderInfo(&jrd100,0x00) == 0)
+    for(i = 0; i < sizeof(rxBuffer); i++)
     {
-       printf("ERROR: JRD-100 command transmission failed.\r\n");
-
-        while(1)
-        {
-        }
+        rxBuffer[i] = 0;
     }
 
 
- //   printf("Command transmitted successfully.\r\n");
-  //  printf("TX: BB 00 03 00 01 00 04 7E\r\n");
+    /*
+     * --------------------------------------------------------
+     * 7. Clear application flags
+     * --------------------------------------------------------
+     */
+
+    txComplete = 0;
+    rxComplete = 0;
+    rxError = 0;
 
 
     /*
-     * ========================================================
-     * RECEIVE RESPONSE
+     * --------------------------------------------------------
+     * 8. START RX FIRST
      *
-     * Blocking receive for now.
+     * IMPORTANT:
      *
-     * USART_ReceiveData() waits for RXNE.
+     * We are intentionally using the OLD WORKING API:
      *
-     * Every received byte is passed to:
+     * USART_ReceiveDataIT()
      *
-     * JRD100_ProcessByte()
-     * ========================================================
+     * NOT:
+     *
+     * USART_ReceiveByteIT()
+     *
+     * --------------------------------------------------------
      */
 
-//    printf("Waiting for JRD-100 response...\r\n");
+    USART_ReceiveDataIT(
+        &usart3,
+        rxBuffer,
+        sizeof(rxBuffer)
+    );
 
 
-    while(!JRD100_IsFrameReady(&jrd100))
+    /*
+     * --------------------------------------------------------
+     * 9. SEND JRD-100 GET READER INFO COMMAND
+     *
+     * We are using your existing JRD-100 API.
+     * --------------------------------------------------------
+     */
+
+    txComplete = 0;
+
+    JRD100_GetReaderInfo(
+        &jrd100,
+        0x00
+    );
+
+
+    /*
+     * --------------------------------------------------------
+     * 10. Wait until the transmission is completely finished.
+     *
+     * RX interrupts continue running while we wait.
+     * --------------------------------------------------------
+     */
+
+    while(txComplete == 0)
     {
-        USART_ReceiveData(&usart3,&receivedByte,1);
-
-        JRD100_ProcessByte(&jrd100,receivedByte);
+        /*
+         * USART interrupts handle TX and RX.
+         */
     }
 
+
     printf("\r\n");
-    printf("Complete frame received!\r\n");
+    printf("JRD-100 command transmitted.\r\n");
+    printf("Waiting for JRD-100 response...\r\n");
 
 
     /*
-     * ========================================================
-     * Validate received frame
-     * ========================================================
+     * --------------------------------------------------------
+     * 11. MAIN LOOP
+     * --------------------------------------------------------
      */
 
-    frameValid = JRD100_ValidateFrame(&jrd100);
-
-
-    if(frameValid)
+    while(1)
     {
-        printf("\r\n");
-        printf("========================================\r\n");
-        printf("JRD-100 RESPONSE: VALID\r\n");
-        printf("========================================\r\n");
+        /*
+         * ----------------------------------------------------
+         * Check USART error
+         * ----------------------------------------------------
+         */
 
-
-        printf("Frame length = %u\r\n",jrd100.rxIndex);
-
-
-        printf("Raw frame: ");
-
-        for(i = 0; i < jrd100.rxIndex; i++)
+        if(rxError)
         {
-            printf("%02X ",jrd100.rxBuffer[i]);
+            printf("\r\n");
+            printf("USART RX ERROR!\r\n");
+
+            rxError = 0;
         }
-
-        printf("\r\n");
-
-
-        printf("Checksum: VALID\r\n");
-
-        printf("========================================\r\n");
 
 
         /*
-         * TEST PASSED
+         * ----------------------------------------------------
+         * Check whether JRD-100 parser received a complete
+         * frame.
+         * ----------------------------------------------------
          */
 
-        while(1)
+        if(JRD100_IsFrameReady(&jrd100))
         {
+            printf("\r\n");
+            printf("JRD-100 frameReady = 1\r\n");
+
+
+            /*
+             * ------------------------------------------------
+             * Validate frame
+             * ------------------------------------------------
+             */
+
+            frameValid =
+                JRD100_ValidateFrame(&jrd100);
+
+
+            if(frameValid)
+            {
+                printf("Checksum: VALID\r\n");
+            }
+            else
+            {
+                printf("Checksum: INVALID\r\n");
+            }
+
+
+            /*
+             * ------------------------------------------------
+             * Print raw JRD-100 frame
+             * ------------------------------------------------
+             */
+
+            PrintJRD100Frame();
+
+
+            /*
+             * ------------------------------------------------
+             * Clear parser for next frame.
+             * ------------------------------------------------
+             */
+
+            JRD100_ClearFrame(&jrd100);
+
+            printf("Waiting for next frame...\r\n");
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * Fixed-length USART reception completion
+         *
+         * This is NOT the JRD-100 frame completion mechanism.
+         *
+         * It only tells us that the 256-byte RX buffer has
+         * filled completely.
+         * ----------------------------------------------------
+         */
+
+        if(rxComplete)
+        {
+            printf("\r\n");
+            printf("USART RX buffer reached 256 bytes.\r\n");
+
+            rxComplete = 0;
         }
     }
-    else
-    {
-        printf("\r\n");
-        printf("========================================\r\n");
-        printf("JRD-100 RESPONSE: CHECKSUM ERROR\r\n");
-        printf("========================================\r\n");
-
-
-        printf("Received frame: ");
-
-        for(i = 0; i < jrd100.rxIndex; i++)
-        {
-            printf("%02X ",jrd100.rxBuffer[i]);
-        }
-
-        printf("\r\n");
-
-
-        while(1)
-        {
-        }
-    }
-}
-
-void USART3_IRQHandler(void)
-{
-    USART_IRQHandling(&usart3);
 }
 
