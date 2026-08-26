@@ -466,35 +466,15 @@ void USART_IRQHandling(USART_Handle_t *pUSARTHandle)
     if(ore_status && eie_status)
     {
         /*
-         * Clear ORE:
-         *
-         * Read SR first
-         * Read DR second
+         * Clear ORE.
          */
-
         (void)pUSARTHandle->pUSARTx->SR;
         (void)pUSARTHandle->pUSARTx->DR;
 
-
         /*
-         * Stop fixed-length RX operation if one is active.
+         * Keep RX interrupt enabled.
          */
-
         pUSARTHandle->RxBusyState = USART_READY;
-
-        pUSARTHandle->pUSARTx->CR1 &=
-            ~(1 << USART_IRQ_RXNE);
-
-        pUSARTHandle->pUSARTx->CR3 &=
-            ~(1 << 0);
-
-
-        /*
-         * Notify application.
-         *
-         * No byte is associated with this event,
-         * so pass 0.
-         */
 
         USART_ApplicationEventCallback(
             pUSARTHandle,
