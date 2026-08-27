@@ -616,9 +616,9 @@ typedef struct
 #define FLAG_RESET				RESET
 #define FLAG_SET				SET
 
-#include "stm32f429xx_drivers_gpio.h"
-#include "stm32f429xx_drivers_uart.h"
-#include "stm32f429xx_drivers_rcc.h"
+#include "stm32f429xx_driver_gpio.h"
+#include "stm32f429xx_driver_uart.h"
+#include "stm32f429xx_driver_rcc.h"
 
 
 
