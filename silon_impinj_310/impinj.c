@@ -277,7 +277,7 @@ uint8_t SILION_SendFrame(
 uint8_t SILION_GetVersion(
         Silion_Handle_t *pSilionHandle)
 {
-    uint8_t frame[8];
+   static uint8_t frame[8];
 
     uint16_t frameLength;
 
@@ -298,6 +298,278 @@ uint8_t SILION_GetVersion(
     );
 }
 
+/*
+ * ============================================================
+ * BOOT FIRMWARE
+ *
+ * Protocol:
+ *
+ *     FF 00 04 1D 0B
+ *
+ * No data field.
+ *
+ * This moves the module from the bootloader layer into
+ * application firmware.
+ * ============================================================
+ */
+uint8_t SILION_BootFirmware(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t frame[8];
+
+    uint16_t frameLength;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_BOOT_FIRMWARE,
+            NULL,
+            0,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+
+/*
+ * ============================================================
+ * GET RUN PHASE
+ *
+ * Protocol:
+ *
+ *     FF 00 0C 1D 03
+ *
+ * No data field.
+ *
+ * Response data:
+ *
+ *     0x11 = Bootloader
+ *     0x12 = Application firmware
+ * ============================================================
+ */
+uint8_t SILION_GetRunPhase(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t frame[8];
+
+    uint16_t frameLength;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_RUN_PHASE,
+            NULL,
+            0,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
+ * SET CURRENT REGION
+ *
+ * Region:
+ *     0xFF = Full Band
+ *
+ * Bench/test use only.
+ *
+ * Frame:
+ *
+ *     FF 01 97 FF 4B 42
+ * ============================================================
+ */
+uint8_t SILION_SetRegion(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t region)
+{
+    static uint8_t frame[8];
+
+    uint16_t frameLength;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SET_REGION,
+            &region,
+            1,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_SetInventoryAntenna(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t txAntenna,
+        uint8_t rxAntenna)
+{
+    static uint8_t data[3];
+    static uint8_t frame[10];
+
+    uint16_t frameLength;
+
+    data[0] = SILION_ANTENNA_OPTION_INVENTORY;
+    data[1] = txAntenna;
+    data[2] = rxAntenna;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SET_ANTENNA_PORTS,
+            data,
+            3,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
+ * SET ANTENNA POWER
+ *
+ * 0x91 / Option 0x03
+ *
+ * Power unit:
+ *     0.01 dBm
+ *
+ * Example:
+ *     3000 = 30.00 dBm = 0x0BB8
+ *
+ * Data:
+ *
+ *     03
+ *     antenna
+ *     read power MSB
+ *     read power LSB
+ *     write power MSB
+ *     write power LSB
+ *
+ * ============================================================
+ */
+
+uint8_t SILION_SetAntennaPower(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t antenna,
+        uint16_t readPower,
+        uint16_t writePower)
+{
+    static uint8_t data[6];
+    static uint8_t frame[13];
+
+    uint16_t frameLength;
+
+
+    data[0] =
+        SILION_ANTENNA_OPTION_POWER;
+
+    data[1] =
+        antenna;
+
+    data[2] =
+        (uint8_t)(readPower >> 8);
+
+    data[3] =
+        (uint8_t)(readPower & 0xFFU);
+
+    data[4] =
+        (uint8_t)(writePower >> 8);
+
+    data[5] =
+        (uint8_t)(writePower & 0xFFU);
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SET_ANTENNA_PORTS,
+            data,
+            6,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
+ * SET PROTOCOL SESSION
+ *
+ * 0x9B Set Protocol Configuration
+ *
+ * Data:
+ *
+ *     Protocol = 0x05 (GEN2)
+ *     Parameter = 0x00 (Session)
+ *     Value = session
+ *
+ * Example from protocol:
+ *
+ *     FF 03 9B 05 00 01 DC E9
+ *
+ *     = GEN2, Session 1
+ * ============================================================
+ */
+uint8_t SILION_SetProtocolSession(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t session)
+{
+    static uint8_t data[3];
+    static uint8_t frame[10];
+
+    uint16_t frameLength;
+
+
+    data[0] =
+        SILION_PROTOCOL_GEN2;
+
+    data[1] =
+        SILION_PROTOCOL_PARAM_SESSION;
+
+    data[2] =
+        session;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SET_PROTOCOL_CONFIG,
+            data,
+            3,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
 
 /*
  * ============================================================
@@ -737,3 +1009,4 @@ uint16_t SILION_GetStatus(
 {
     return pSilionHandle->status;
 }
+
