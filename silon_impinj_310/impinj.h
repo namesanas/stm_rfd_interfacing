@@ -63,6 +63,27 @@
 #define SILION_CMD_ASYNC_INVENTORY   0xAAU
 
 
+#define SILION_PROGRAM_BOOTLOADER    0x11U
+#define SILION_PROGRAM_APPLICATION   0x12U
+
+#define SILION_CMD_SET_REGION       0x97U
+#define SILION_REGION_FULL_BAND     0xFFU
+
+#define SILION_CMD_SET_ANTENNA_PORTS   0x91U
+
+#define SILION_ANTENNA_OPTION_ACCESS   0x00U
+#define SILION_ANTENNA_OPTION_INVENTORY 0x02U
+#define SILION_ANTENNA_OPTION_POWER    0x03U
+
+#define SILION_CMD_SET_PROTOCOL_CONFIG    0x9BU
+
+#define SILION_PROTOCOL_GEN2             0x05U
+#define SILION_PROTOCOL_PARAM_SESSION    0x00U
+#define SILION_SESSION_0                 0x00U
+#define SILION_SESSION_1                 0x01U
+
+
+
 /*
  * ============================================================
  * RECEIVE STATES
@@ -199,6 +220,27 @@ uint8_t SILION_SendFrame(
 
 uint8_t SILION_GetVersion(
         Silion_Handle_t *pSilionHandle);
+
+uint8_t SILION_BootFirmware(
+        Silion_Handle_t *pSilionHandle);
+
+uint8_t SILION_GetRunPhase(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_SetRegion(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t region);
+uint8_t SILION_SetInventoryAntenna(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t txAntenna,
+        uint8_t rxAntenna);
+uint8_t SILION_SetAntennaPower(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t antenna,
+        uint16_t readPower,
+        uint16_t writePower);
+uint8_t SILION_SetProtocolSession(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t session);
 
 
 /*
