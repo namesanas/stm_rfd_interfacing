@@ -82,6 +82,10 @@
 #define SILION_SESSION_0                 0x00U
 #define SILION_SESSION_1                 0x01U
 
+#define SILION_CMD_SINGLE_TAG_INVENTORY   0x21U
+
+#define SILION_INVENTORY_OPTION_NONE      0x00U
+
 
 
 /*
@@ -241,6 +245,9 @@ uint8_t SILION_SetAntennaPower(
 uint8_t SILION_SetProtocolSession(
         Silion_Handle_t *pSilionHandle,
         uint8_t session);
+uint8_t SILION_SingleTagInventory(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs);
 
 
 /*
