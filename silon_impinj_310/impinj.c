@@ -573,6 +573,74 @@ uint8_t SILION_SetProtocolSession(
 
 /*
  * ============================================================
+ * SINGLE TAG INVENTORY
+ *
+ * Command:
+ *
+ *     0x21
+ *
+ * Option:
+ *
+ *     0x00 = no filter, EPC only
+ *
+ * Timeout:
+ *
+ *     milliseconds
+ *
+ * Example for 1000 ms:
+ *
+ *     FF 03 21 03 E8 00 03 2A
+ *
+ * ============================================================
+ */
+
+uint8_t SILION_SingleTagInventory(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs)
+{
+    static uint8_t data[3];
+    static uint8_t frame[10];
+
+    uint16_t frameLength;
+
+
+    /*
+     * Timeout MSB first.
+     */
+    data[0] =
+        (uint8_t)(timeoutMs >> 8);
+
+    data[1] =
+        (uint8_t)(timeoutMs & 0xFFU);
+
+
+    /*
+     * Option:
+     *
+     * 0x00 = no filter, EPC only.
+     */
+    data[2] =
+        SILION_INVENTORY_OPTION_NONE;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SINGLE_TAG_INVENTORY,
+            data,
+            3,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
  * RECEIVE BYTE
  *
  * Reply format:
