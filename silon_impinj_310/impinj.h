@@ -1,3 +1,10 @@
+/*
+ * impinj.h
+ *
+ *  Created on: 27-Aug-2026
+ *      Author: Identium
+ */
+
 #ifndef INC_IMPINJ_H_
 #define INC_IMPINJ_H_
 
@@ -79,12 +86,24 @@
 
 #define SILION_PROTOCOL_GEN2             0x05U
 #define SILION_PROTOCOL_PARAM_SESSION    0x00U
+#define SILION_CMD_SET_TAG_PROTOCOL    0x93U
+#define SILION_TAG_PROTOCOL_GEN2       0x0005U
+
 #define SILION_SESSION_0                 0x00U
 #define SILION_SESSION_1                 0x01U
 
 #define SILION_CMD_SINGLE_TAG_INVENTORY   0x21U
 
 #define SILION_INVENTORY_OPTION_NONE      0x00U
+#define SILION_CMD_SYNC_INVENTORY    	  0x22U
+
+#define SILION_CMD_GET_TAG_BUFFER     0x29U
+
+#define SILION_TAG_BUFFER_OPTION_NEW  0x00U
+#define SILION_TAG_BUFFER_OPTION_REFETCH 0x01U
+
+#define SILION_TAG_METADATA_NONE   0x0000U
+#define SILION_TAG_METADATA_ALL    0x00BFU
 
 
 
@@ -168,6 +187,26 @@ typedef struct
 
 } Silion_Handle_t;
 
+typedef struct
+{
+    uint8_t  readCount;
+    int8_t   rssi;
+    uint8_t  antenna;
+
+    uint32_t frequencyKHz;
+    uint32_t timestampMs;
+
+    uint16_t epcLengthBits;
+
+    uint16_t pcWord;
+
+    uint8_t  epc[64];
+    uint16_t epcLengthBytes;
+
+    uint16_t tagCrc;
+
+} SILION_Tag_t;
+
 
 /*
  * ============================================================
@@ -242,13 +281,26 @@ uint8_t SILION_SetAntennaPower(
         uint8_t antenna,
         uint16_t readPower,
         uint16_t writePower);
+uint8_t SILION_SetTagProtocol(
+        Silion_Handle_t *pSilionHandle);
 uint8_t SILION_SetProtocolSession(
         Silion_Handle_t *pSilionHandle,
         uint8_t session);
 uint8_t SILION_SingleTagInventory(
         Silion_Handle_t *pSilionHandle,
         uint16_t timeoutMs);
+uint8_t SILION_SynchronousInventory(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs);
+uint8_t SILION_GetTagBuffer(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t metadataFlags);
 
+uint8_t SILION_ParseTagBuffer(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tags,
+        uint8_t maxTags,
+        uint8_t *tagCount);
 
 /*
  * ============================================================
