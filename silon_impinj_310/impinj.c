@@ -573,6 +573,54 @@ uint8_t SILION_SetProtocolSession(
 
 /*
  * ============================================================
+ * SET TAG PROTOCOL
+ *
+ * 0x93
+ *
+ * GEN2 / 18K-6C:
+ *
+ *     00 05
+ *
+ * Complete frame:
+ *
+ *     FF 02 93 00 05 51 7D
+ * ============================================================
+ */
+
+uint8_t SILION_SetTagProtocol(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t data[2];
+    static uint8_t frame[9];
+
+    uint16_t frameLength;
+
+
+    data[0] =
+        (uint8_t)(SILION_TAG_PROTOCOL_GEN2 >> 8);
+
+    data[1] =
+        (uint8_t)(SILION_TAG_PROTOCOL_GEN2 & 0xFFU);
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SET_TAG_PROTOCOL,
+            data,
+            2,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
  * SINGLE TAG INVENTORY
  *
  * Command:
@@ -641,6 +689,492 @@ uint8_t SILION_SingleTagInventory(
 
 /*
  * ============================================================
+ * SYNCHRONOUS INVENTORY
+ *
+ * 0x22
+ *
+ * Option       = 0x00
+ * Search Flags = 0x0000
+ * Timeout      = timeoutMs
+ *
+ * No filter.
+ * No embedded command.
+ *
+ * Response contains the number of tags found.
+ * Tags themselves are retrieved with 0x29.
+ * ============================================================
+ */
+
+uint8_t SILION_SynchronousInventory(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs)
+{
+    static uint8_t data[5];
+    static uint8_t frame[12];
+
+    uint16_t frameLength;
+
+
+    /*
+     * Option = no filter.
+     */
+    data[0] = 0x00U;
+
+
+    /*
+     * Search Flags = 0x0000.
+     */
+    data[1] = 0x00U;
+    data[2] = 0x00U;
+
+
+    /*
+     * Timeout, MSB first.
+     */
+    data[3] =
+        (uint8_t)(timeoutMs >> 8);
+
+    data[4] =
+        (uint8_t)(timeoutMs & 0xFFU);
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_SYNC_INVENTORY,
+            data,
+            5,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
+ * GET TAG BUFFER
+ *
+ * metadataFlags:
+ *
+ *   0x0000 = EPC only
+ *   0x00BF = read count + RSSI + antenna + frequency +
+ *            timestamp + RFU + tag data length
+ *
+ * option:
+ *
+ *   0x00 = fetch unread tags
+ * ============================================================
+ */
+uint8_t SILION_GetTagBuffer(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t metadataFlags)
+{
+    static uint8_t data[3];
+    static uint8_t frame[10];
+
+    uint16_t frameLength;
+
+
+    data[0] =
+        (uint8_t)(metadataFlags >> 8);
+
+    data[1] =
+        (uint8_t)(metadataFlags & 0xFFU);
+
+    data[2] =
+        SILION_TAG_BUFFER_OPTION_NEW;
+
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_TAG_BUFFER,
+            data,
+            3,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+
+
+
+
+uint8_t SILION_ParseTagBuffer(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tags,
+        uint8_t maxTags,
+        uint8_t *tagCount)
+{
+    uint16_t index;
+    uint8_t count;
+    uint8_t i;
+
+    /*
+     * Minimum response data:
+     *
+     * Metadata Flags = 2
+     * Option         = 1
+     * Tag Count      = 1
+     */
+    if(pSilionHandle->expectedLength < 4U)
+    {
+        return 0U;
+    }
+
+
+    /*
+     * 0x29 response:
+     *
+     * rxBuffer[5] = Metadata Flags MSB
+     * rxBuffer[6] = Metadata Flags LSB
+     * rxBuffer[7] = Option
+     * rxBuffer[8] = Tag Count
+     */
+    count =
+        pSilionHandle->rxBuffer[8];
+
+
+    if(count > maxTags)
+    {
+        count = maxTags;
+    }
+
+
+    *tagCount = count;
+
+
+    /*
+     * First tag starts immediately after:
+     *
+     * FF
+     * LEN
+     * CMD
+     * STATUS MSB
+     * STATUS LSB
+     * Metadata Flags (2)
+     * Option (1)
+     * Tag Count (1)
+     *
+     * Therefore:
+     *
+     * index = 9
+     */
+    index = 9U;
+
+
+    for(i = 0U; i < count; i++)
+    {
+        uint16_t tagDataLength;
+        uint16_t epcLengthBits;
+        uint16_t epcTotalBytes;
+        uint16_t epcBytes;
+
+
+        /*
+         * ----------------------------------------------------
+         * Read Count
+         * ----------------------------------------------------
+         */
+        if(
+            index >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].readCount =
+            pSilionHandle->rxBuffer[index++];
+
+
+        /*
+         * ----------------------------------------------------
+         * RSSI
+         * ----------------------------------------------------
+         */
+        if(
+            index >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].rssi =
+            (int8_t)pSilionHandle->rxBuffer[index++];
+
+
+        /*
+         * ----------------------------------------------------
+         * Antenna
+         * ----------------------------------------------------
+         */
+        if(
+            index >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].antenna =
+            pSilionHandle->rxBuffer[index++];
+
+
+        /*
+         * ----------------------------------------------------
+         * Frequency - 3 bytes, kHz
+         * ----------------------------------------------------
+         */
+        if(
+            (index + 2U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].frequencyKHz =
+            ((uint32_t)pSilionHandle->rxBuffer[index] << 16)
+            |
+            ((uint32_t)pSilionHandle->rxBuffer[index + 1U] << 8)
+            |
+            ((uint32_t)pSilionHandle->rxBuffer[index + 2U]);
+
+        index += 3U;
+
+
+        /*
+         * ----------------------------------------------------
+         * Timestamp - 4 bytes, ms
+         * ----------------------------------------------------
+         */
+        if(
+            (index + 3U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].timestampMs =
+            ((uint32_t)pSilionHandle->rxBuffer[index] << 24)
+            |
+            ((uint32_t)pSilionHandle->rxBuffer[index + 1U] << 16)
+            |
+            ((uint32_t)pSilionHandle->rxBuffer[index + 2U] << 8)
+            |
+            ((uint32_t)pSilionHandle->rxBuffer[index + 3U]);
+
+        index += 4U;
+
+
+        /*
+         * ----------------------------------------------------
+         * RFU - 2 bytes
+         * ----------------------------------------------------
+         */
+        if(
+            (index + 1U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        index += 2U;
+
+
+        /*
+         * ----------------------------------------------------
+         * Tag Data Length
+         * ----------------------------------------------------
+         *
+         * Our 0x22 command did not request an embedded 0x28,
+         * so this should normally be 0.
+         */
+        if(
+            (index + 1U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tagDataLength =
+            ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+            |
+            pSilionHandle->rxBuffer[index + 1U];
+
+        index += 2U;
+
+
+        /*
+         * Skip tag data, if any.
+         *
+         * Length is in bits.
+         */
+        if(
+            (tagDataLength % 8U) != 0U
+        )
+        {
+            return 0U;
+        }
+
+        index +=
+            (uint16_t)(tagDataLength / 8U);
+
+
+        /*
+         * ----------------------------------------------------
+         * EPC Length
+         * ----------------------------------------------------
+         *
+         * Actual 0x29 hardware response:
+         *
+         * 2-byte value, in bits.
+         */
+        if(
+            (index + 1U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        epcLengthBits =
+            ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+            |
+            pSilionHandle->rxBuffer[index + 1U];
+
+        index += 2U;
+
+
+        tags[i].epcLengthBits =
+            epcLengthBits;
+
+
+        /*
+         * ----------------------------------------------------
+         * PC Word
+         * ----------------------------------------------------
+         */
+        if(
+            (index + 1U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+        tags[i].pcWord =
+            ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+            |
+            pSilionHandle->rxBuffer[index + 1U];
+
+        index += 2U;
+
+
+        /*
+         * ----------------------------------------------------
+         * EPC length
+         *
+         * EPC Length includes:
+         *
+         *     PC  = 2 bytes
+         *     EPC = N bytes
+         *     CRC = 2 bytes
+         */
+        if(
+            (epcLengthBits % 8U) != 0U
+        )
+        {
+            return 0U;
+        }
+
+        epcTotalBytes =
+            (uint16_t)(epcLengthBits / 8U);
+
+
+        if(epcTotalBytes < 4U)
+        {
+            return 0U;
+        }
+
+
+        epcBytes =
+            epcTotalBytes - 4U;
+
+
+        if(epcBytes > sizeof(tags[i].epc))
+        {
+            return 0U;
+        }
+
+
+        if(
+            (index + epcBytes + 1U) >=
+            pSilionHandle->rxIndex
+        )
+        {
+            return 0U;
+        }
+
+
+        tags[i].epcLengthBytes =
+            epcBytes;
+
+
+        /*
+         * ----------------------------------------------------
+         * EPC
+         * ----------------------------------------------------
+         */
+        for(
+            uint16_t n = 0U;
+            n < epcBytes;
+            n++
+        )
+        {
+            tags[i].epc[n] =
+                pSilionHandle->rxBuffer[index++];
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * Tag CRC
+         * ----------------------------------------------------
+         */
+        tags[i].tagCrc =
+            ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+            |
+            pSilionHandle->rxBuffer[index + 1U];
+
+        index += 2U;
+    }
+
+
+    return 1U;
+}
+
+
+
+
+
+
+/*
+ * ============================================================
  * RECEIVE BYTE
  *
  * Reply format:
@@ -659,6 +1193,8 @@ uint8_t SILION_SingleTagInventory(
  * Because LEN counts DATA only.
  * ============================================================
  */
+
+
 
 void SILION_ProcessByte(
         Silion_Handle_t *pSilionHandle,
@@ -1077,4 +1613,3 @@ uint16_t SILION_GetStatus(
 {
     return pSilionHandle->status;
 }
-
