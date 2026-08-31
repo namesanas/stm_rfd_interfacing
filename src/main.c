@@ -1254,6 +1254,118 @@ int main(void)
 
         /*
          * ============================================================
+         * 0x93 SET TAG PROTOCOL
+         *
+         * GEN2 / 18K-6C
+         *
+         * NO printf() DURING TRANSACTION
+         * ============================================================
+         */
+
+        SILION_ClearFrame(
+            &silion
+        );
+
+        SILION_ClearUartFlags();
+
+        txComplete = 0;
+
+
+        SILION_SetTagProtocol(
+            &silion
+        );
+
+
+        /*
+         * NO PRINTF HERE
+         */
+
+        result =
+            SILION_WaitForTxComplete(
+                100000000UL
+            );
+
+        if(result <= 0)
+        {
+            printf(
+                "ERROR: Set Tag Protocol TX failed.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        /*
+         * NO PRINTF HERE
+         */
+
+        result =
+            SILION_WaitForResponse(
+                100000000UL
+            );
+
+        if(result != 1)
+        {
+            printf(
+                "ERROR: Set Tag Protocol response failed.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        /*
+         * Transaction complete.
+         */
+
+        if(
+            SILION_GetCommand(&silion)
+            !=
+            SILION_CMD_SET_TAG_PROTOCOL
+        )
+        {
+            printf(
+                "ERROR: Invalid Set Tag Protocol response.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        if(
+            SILION_GetStatus(&silion)
+            !=
+            SILION_STATUS_SUCCESS
+        )
+        {
+            printf(
+                "ERROR: Set Tag Protocol failed, status = 0x%04X\r\n",
+                SILION_GetStatus(&silion)
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        printf(
+            "Set Tag Protocol GEN2: SUCCESS\r\n"
+        );
+
+
+        SILION_ClearFrame(
+            &silion
+        );
+
+        /*
+         * ============================================================
          * 0x9B SET PROTOCOL CONFIGURATION
          *
          * GEN2
@@ -1270,7 +1382,7 @@ int main(void)
         txComplete = 0;
 
 
-        SILION_SetProtocolSession(&silion,SILION_SESSION_1);
+        SILION_SetProtocolSession(&silion,SILION_SESSION_0);
 
 
         /*
@@ -1330,10 +1442,405 @@ int main(void)
         }
 
 
-        printf("Set Protocol Session 1: SUCCESS\r\n");
+        printf("Set Protocol Session 0: SUCCESS\r\n");
 
 
         SILION_ClearFrame(&silion);
+
+        /*
+         * ============================================================
+         * 0x22 SYNCHRONOUS INVENTORY
+
+         * No filter
+         * Search Flags = 0
+         * Timeout = 200 ms
+         *
+         * IMPORTANT:
+         * No printf() between TX and RX.
+         * ============================================================
+         */
+
+        SILION_ClearFrame(
+            &silion
+        );
+
+        SILION_ClearUartFlags();
+
+        txComplete = 0;
+
+
+        /*
+         * Start synchronous inventory.
+         */
+        SILION_SynchronousInventory(
+            &silion,
+            10000
+        );
+
+
+        /*
+         * ------------------------------------------------------------
+         * NO PRINTF HERE
+         * ------------------------------------------------------------
+         */
+
+        result =
+            SILION_WaitForTxComplete(
+                100000000UL
+            );
+
+        if(result <= 0)
+        {
+            printf(
+                "ERROR: Synchronous Inventory TX failed.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        /*
+         * ------------------------------------------------------------
+         * NO PRINTF HERE
+         *
+         * Wait for the complete 0x22 response.
+         * ------------------------------------------------------------
+         */
+
+        result =
+            SILION_WaitForResponse(
+                100000000UL
+            );
+
+        if(result != 1)
+        {
+            printf(
+                "ERROR: Synchronous Inventory response failed.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        /*
+         * ------------------------------------------------------------
+         * Transaction finished.
+         * ------------------------------------------------------------
+         */
+
+        PrintSilionFrame();
+
+
+        if(
+            SILION_GetCommand(&silion)
+            !=
+            SILION_CMD_SYNC_INVENTORY
+        )
+        {
+            printf(
+                "ERROR: Invalid Synchronous Inventory response.\r\n"
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        if(
+            SILION_GetStatus(&silion)
+            !=
+            SILION_STATUS_SUCCESS
+        )
+        {
+            printf(
+                "Synchronous Inventory status = 0x%04X\r\n",
+                SILION_GetStatus(&silion)
+            );
+
+            while(1)
+            {
+            }
+        }
+
+
+        /*
+         * ------------------------------------------------------------
+         * Parse tag count.
+         *
+         * Normal response:
+         *
+         * FF LEN 22 STATUS OPTION SEARCH_FLAGS TAG_COUNT CRC
+         *
+         * With Search Flags = 0, tag count is 1 byte.
+         *
+         * Data:
+         *
+         *     [0] Option
+         *     [1] Search Flags MSB
+         *     [2] Search Flags LSB
+         *     [3] Tag Count
+         * ------------------------------------------------------------
+         */
+        uint8_t tagCount;
+
+        if(
+            silion.expectedLength >= 4U
+        )
+        {
+
+
+            tagCount =
+                silion.rxBuffer[8];
+
+
+            printf(
+                "Tags Found: %u\r\n",
+                tagCount
+            );
+        }
+        else
+        {
+            printf(
+                "ERROR: Synchronous Inventory response too short.\r\n"
+            );
+        }
+
+
+        /*
+         * ============================================================
+         * 0x29 GET TAG BUFFER
+         *
+         * Get tags collected by 0x22.
+         *
+         * Metadata Flags = 0x0000
+         * Option         = 0x00
+         *
+         * IMPORTANT:
+         * No printf() between TX and RX.
+         * ============================================================
+         */
+
+        if(tagCount > 0U)
+        {
+            SILION_ClearFrame(
+                &silion
+            );
+
+            SILION_ClearUartFlags();
+
+            txComplete = 0;
+
+
+            /*
+             * Request unread tags from the internal buffer.
+             */
+            SILION_GetTagBuffer(
+                &silion,
+                SILION_TAG_METADATA_ALL
+            );
+
+
+            /*
+             * --------------------------------------------------------
+             * NO PRINTF HERE
+             * --------------------------------------------------------
+             */
+
+            result =
+                SILION_WaitForTxComplete(
+                    100000000UL
+                );
+
+
+            if(result <= 0)
+            {
+                printf(
+                    "ERROR: Get Tag Buffer TX failed.\r\n"
+                );
+
+                while(1)
+                {
+                }
+            }
+
+
+            /*
+             * --------------------------------------------------------
+             * NO PRINTF HERE
+             * --------------------------------------------------------
+             */
+
+            result =
+                SILION_WaitForResponse(
+                    100000000UL
+                );
+
+
+            if(result != 1)
+            {
+                printf(
+                    "ERROR: Get Tag Buffer response failed.\r\n"
+                );
+
+                while(1)
+                {
+                }
+            }
+
+
+            /*
+             * --------------------------------------------------------
+             * Transaction is complete.
+             * --------------------------------------------------------
+             */
+
+            if(
+                SILION_GetCommand(&silion)
+                !=
+                SILION_CMD_GET_TAG_BUFFER
+            )
+            {
+                printf(
+                    "ERROR: Invalid Get Tag Buffer response.\r\n"
+                );
+
+                while(1)
+                {
+                }
+            }
+
+
+            if(
+                SILION_GetStatus(&silion)
+                !=
+                SILION_STATUS_SUCCESS
+            )
+            {
+                printf(
+                    "ERROR: Get Tag Buffer status = 0x%04X\r\n",
+                    SILION_GetStatus(&silion)
+                );
+
+                while(1)
+                {
+                }
+            }
+
+
+            /*
+             * NOW printf is safe.
+             */
+            PrintSilionFrame();
+        }
+
+
+        /*
+        SILION_ClearFrame(
+            &silion
+        );
+*/
+
+
+
+    SILION_Tag_t tags[16];
+    uint8_t parsedTagCount;
+
+    if(
+        SILION_ParseTagBuffer(
+            &silion,
+            tags,
+            16U,
+            &parsedTagCount
+        )
+    )
+    {
+        printf(
+            "\r\nParsed Tags: %u\r\n",
+            parsedTagCount
+        );
+
+        for(
+            uint8_t t = 0U;
+            t < parsedTagCount;
+            t++
+        )
+        {
+            printf(
+                "\r\nTag %u\r\n",
+                t + 1U
+            );
+
+            printf(
+                "Read Count : %u\r\n",
+                tags[t].readCount
+            );
+
+            printf(
+                "RSSI       : %d dBm\r\n",
+                tags[t].rssi
+            );
+
+            printf(
+                "Antenna    : %u\r\n",
+                tags[t].antenna
+            );
+
+            printf(
+                "Frequency  : %lu kHz\r\n",
+                (unsigned long)tags[t].frequencyKHz
+            );
+
+            printf(
+                "Timestamp  : %lu ms\r\n",
+                (unsigned long)tags[t].timestampMs
+            );
+
+            printf(
+                "PC         : %04X\r\n",
+                tags[t].pcWord
+            );
+
+            printf(
+                "EPC        : "
+            );
+
+            for(
+                uint16_t e = 0U;
+                e < tags[t].epcLengthBytes;
+                e++
+            )
+            {
+                printf(
+                    "%02X",
+                    tags[t].epc[e]
+                );
+            }
+
+            printf(
+                "\r\n"
+            );
+
+            printf(
+                "Tag CRC    : %04X\r\n",
+                tags[t].tagCrc
+            );
+        }
+    }
+
+    printf(
+        "\r\nSynchronous Inventory test complete.\r\n"
+    );
+
+
+    while(1)
+    {
+    }
+
 
 
     /*
@@ -1355,203 +1862,4 @@ int main(void)
     printf("========================================\r\n");
 
 
-    /*
- * ============================================================
- * 0x21 SINGLE TAG INVENTORY
- *
- * Timeout = 1000 ms
- * Option  = 0x00
- *
- * No filter.
- * EPC only.
- *
- * NO printf() DURING TRANSACTION.
- * ============================================================
- */
-
-SILION_ClearFrame(&silion);
-
-SILION_ClearUartFlags();
-
-txComplete = 0;
-
-
-SILION_SingleTagInventory(&silion, 1000);
-
-
-/*
- * ------------------------------------------------------------
- * Wait for TX completion.
- *
- * No printf() here.
- * ------------------------------------------------------------
- */
-
-result =SILION_WaitForTxComplete(100000000UL);
-
-
-if(result <= 0)
-{
-    printf("ERROR: Single Tag Inventory TX failed.\r\n"
-    );
-
-    while(1)
-    {
-    }
-}
-
-
-/*
- * ------------------------------------------------------------
- * Wait for inventory response.
- *
- * No printf() here.
- * ------------------------------------------------------------
- */
-
-result =SILION_WaitForResponse(100000000UL);
-
-
-if(result != 1)
-{
-    printf("ERROR: Single Tag Inventory response failed.\r\n");
-
-    while(1)
-    {
-    }
-}
-
-
-/*
- * ------------------------------------------------------------
- * Transaction finished.
- * printf() is safe now.
- * ------------------------------------------------------------
- */
-
-PrintSilionFrame();
-
-
-/*
- * ------------------------------------------------------------
- * Verify command.
- * ------------------------------------------------------------
- */
-
-if(SILION_GetCommand(&silion)!= SILION_CMD_SINGLE_TAG_INVENTORY)
-{
-    printf("ERROR: Invalid Single Tag Inventory response.\r\n");
-
-    while(1)
-    {
-    }
-}
-
-
-/*
- * ------------------------------------------------------------
- * Check status.
- * ------------------------------------------------------------
- */
-
-if(SILION_GetStatus(&silion) ==SILION_STATUS_SUCCESS)
-{
-    printf("Single Tag Inventory: SUCCESS\r\n");
-}
-else
-{
-    /*
-     * 0x0400 means no tags found.
-     *
-     * This is a valid protocol response, not a UART/protocol
-     * failure.
-     */
-    printf( "Single Tag Inventory status = 0x%04X\r\n",SILION_GetStatus(&silion));
-}
-
-
-/*
- * ------------------------------------------------------------
- * For Option 0x00:
- *
- * Response data:
- *
- *     Option
- *     EPC
- *     Tag CRC
- *
- * No EPC-length field is present.
- * ------------------------------------------------------------
- */
-
-if(SILION_GetStatus(&silion) ==SILION_STATUS_SUCCESS)
-{
-    uint16_t epcLength;
-
-
-    /*
-     * Data length is silion.expectedLength.
-     *
-     * Data consists of:
-     *
-     *     1 byte Option
-     *     N bytes EPC
-     *     2 bytes Tag CRC
-     *
-     * Therefore:
-     *
-     *     EPC length = LEN - 3
-     */
-    if(silion.expectedLength >= 3)
-    {
-        epcLength =silion.expectedLength - 3U;
-
-
-        printf("EPC (%u bytes): ",epcLength);
-
-
-        /*
-         * rxBuffer:
-         *
-         * [0] FF
-         * [1] LEN
-         * [2] CMD
-         * [3] STATUS MSB
-         * [4] STATUS LSB
-         * [5] OPTION
-         * [6 ...] EPC
-         */
-        for(uint16_t i = 0;i < epcLength;i++)
-        {
-            printf("%02X ",silion.rxBuffer[6U + i]);
-        }
-
-
-        printf("\r\n");
-
-
-        /*
-         * Tag CRC follows EPC.
-         */
-        printf("Tag CRC: %02X %02X\r\n",silion.rxBuffer[6U + epcLength],silion.rxBuffer[7U + epcLength]);
-    }
-    else
-    {
-        printf("ERROR: Inventory response too short.\r\n");
-    }
-}
-
-
-/*
- * ------------------------------------------------------------
- * Ready for another transaction.
- * ------------------------------------------------------------
- */
-
-SILION_ClearFrame(&silion);
-
-
-    while(1)
-    {
-    }
 }
