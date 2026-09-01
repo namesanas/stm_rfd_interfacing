@@ -105,6 +105,10 @@
 #define SILION_TAG_METADATA_NONE   0x0000U
 #define SILION_TAG_METADATA_ALL    0x00BFU
 
+#define SILION_CMD_ASYNC_INVENTORY  0xAAU
+
+#define SILION_ASYNC_TAG_QUEUE_SIZE 32U
+
 
 
 /*
@@ -142,6 +146,41 @@ typedef enum
  * SILION HANDLE
  * ============================================================
  */
+
+typedef struct
+{
+    uint8_t  readCount;
+    int8_t   rssi;
+    uint8_t  antenna;
+
+    uint32_t frequencyKHz;
+    uint32_t timestampMs;
+
+    uint16_t epcLengthBits;
+
+    uint16_t pcWord;
+
+    uint8_t  epc[64];
+    uint16_t epcLengthBytes;
+
+    uint16_t tagCrc;
+
+} SILION_Tag_t;
+
+typedef struct
+{
+    SILION_Tag_t tags[SILION_ASYNC_TAG_QUEUE_SIZE];
+
+    volatile uint8_t head;
+    volatile uint8_t tail;
+    volatile uint8_t count;
+
+    uint32_t overflow;
+
+} SILION_AsyncTagQueue_t;
+
+
+
 
 typedef struct
 {
@@ -184,29 +223,12 @@ typedef struct
 
     uint8_t frameError;
 
+    uint32_t asyncPacketCount;
+    uint32_t asyncBadPacketCount;
+    SILION_AsyncTagQueue_t asyncTagQueue;
+
 
 } Silion_Handle_t;
-
-typedef struct
-{
-    uint8_t  readCount;
-    int8_t   rssi;
-    uint8_t  antenna;
-
-    uint32_t frequencyKHz;
-    uint32_t timestampMs;
-
-    uint16_t epcLengthBits;
-
-    uint16_t pcWord;
-
-    uint8_t  epc[64];
-    uint16_t epcLengthBytes;
-
-    uint16_t tagCrc;
-
-} SILION_Tag_t;
-
 
 /*
  * ============================================================
@@ -301,6 +323,12 @@ uint8_t SILION_ParseTagBuffer(
         SILION_Tag_t *tags,
         uint8_t maxTags,
         uint8_t *tagCount);
+uint8_t SILION_AsyncTagQueuePop(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag);
+uint8_t SILION_AsyncTagQueuePush(
+        Silion_Handle_t *pSilionHandle,
+        const SILION_Tag_t *tag);
 
 /*
  * ============================================================
@@ -311,7 +339,12 @@ uint8_t SILION_ParseTagBuffer(
 void SILION_ProcessByte(
         Silion_Handle_t *pSilionHandle,
         uint8_t receivedByte);
-
+uint8_t SILION_ProcessAsyncFrame(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag);
+uint8_t SILION_ParseAsyncTag(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag);
 
 /*
  * ============================================================
