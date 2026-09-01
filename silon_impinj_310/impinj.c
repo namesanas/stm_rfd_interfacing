@@ -115,6 +115,13 @@ void SILION_Init(
     pSilionHandle->frameReady = 0;
 
     pSilionHandle->frameError = 0;
+
+    pSilionHandle->asyncPacketCount = 0U;
+    pSilionHandle->asyncBadPacketCount = 0U;
+    pSilionHandle->asyncTagQueue.head = 0U;
+    pSilionHandle->asyncTagQueue.tail = 0U;
+    pSilionHandle->asyncTagQueue.count = 0U;
+    pSilionHandle->asyncTagQueue.overflow = 0U;
 }
 
 
@@ -805,9 +812,469 @@ uint8_t SILION_GetTagBuffer(
     );
 }
 
+uint8_t SILION_ProcessAsyncFrame(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag)
+{
+    if(
+        pSilionHandle == NULL ||
+        tag == NULL
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        pSilionHandle->command
+        !=
+        SILION_CMD_ASYNC_INVENTORY
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        pSilionHandle->status
+        !=
+        SILION_STATUS_SUCCESS
+    )
+    {
+        pSilionHandle->asyncBadPacketCount++;
+        return 0U;
+    }
+
+    if(
+        SILION_ParseAsyncTag(
+            pSilionHandle,
+            tag
+        ) == 0U
+    )
+    {
+        pSilionHandle->asyncBadPacketCount++;
+        return 0U;
+    }
+
+    if(
+        SILION_AsyncTagQueuePush(
+            pSilionHandle,
+            tag
+        ) == 0U
+    )
+    {
+        pSilionHandle->asyncBadPacketCount++;
+        return 0U;
+    }
+
+    pSilionHandle->asyncPacketCount++;
+
+    return 1U;
+}
+
+uint8_t SILION_ParseAsyncTag(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag)
+{
+    uint16_t index;
+    uint16_t tagDataLength;
+    uint8_t epcTotalBytes;
+    uint16_t epcBytes;
+    uint16_t metadataFlags;
 
 
+    if(
+        pSilionHandle == NULL ||
+        tag == NULL
+    )
+    {
+        return 0U;
+    }
 
+
+    /*
+     * --------------------------------------------------------
+     * Minimum async data:
+     *
+     * Metadata Flags = 2 bytes
+     * --------------------------------------------------------
+     */
+    if(
+        pSilionHandle->expectedLength < 2U
+    )
+    {
+        return 0U;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * Metadata flags
+     *
+     * Data begins at rxBuffer[5].
+     * --------------------------------------------------------
+     */
+    metadataFlags =
+        ((uint16_t)pSilionHandle->rxBuffer[5] << 8)
+        |
+        pSilionHandle->rxBuffer[6];
+
+
+    /*
+     * For Stage 2 we expect exactly the metadata requested
+     * when starting async inventory.
+     *
+     * 0x00BF:
+     *
+     * bit 0  Read Count
+     * bit 1  RSSI
+     * bit 2  Antenna
+     * bit 3  Frequency
+     * bit 4  Timestamp
+     * bit 5  RFU
+     * bit 7  Tag Data Length
+     *
+     * Protocol ID (bit 6) is not requested.
+     */
+    if(metadataFlags != SILION_TAG_METADATA_ALL)
+    {
+        return 0U;
+    }
+
+
+    /*
+     * Tag information starts after the metadata flags.
+     */
+    index = 7U;
+
+
+    /*
+     * --------------------------------------------------------
+     * READ COUNT
+     * --------------------------------------------------------
+     */
+    tag->readCount =
+        pSilionHandle->rxBuffer[index++];
+
+
+    /*
+     * --------------------------------------------------------
+     * RSSI
+     * --------------------------------------------------------
+     */
+    tag->rssi =
+        (int8_t)pSilionHandle->rxBuffer[index++];
+
+
+    /*
+     * --------------------------------------------------------
+     * ANTENNA
+     * --------------------------------------------------------
+     */
+    tag->antenna =
+        pSilionHandle->rxBuffer[index++];
+
+
+    /*
+     * --------------------------------------------------------
+     * FREQUENCY
+     *
+     * 3-byte big-endian value in kHz.
+     * --------------------------------------------------------
+     */
+    tag->frequencyKHz =
+        ((uint32_t)pSilionHandle->rxBuffer[index] << 16)
+        |
+        ((uint32_t)pSilionHandle->rxBuffer[index + 1U] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 2U];
+
+    index += 3U;
+
+
+    /*
+     * --------------------------------------------------------
+     * TIMESTAMP
+     *
+     * 4-byte big-endian milliseconds.
+     * --------------------------------------------------------
+     */
+    tag->timestampMs =
+        ((uint32_t)pSilionHandle->rxBuffer[index] << 24)
+        |
+        ((uint32_t)pSilionHandle->rxBuffer[index + 1U] << 16)
+        |
+        ((uint32_t)pSilionHandle->rxBuffer[index + 2U] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 3U];
+
+    index += 4U;
+
+
+    /*
+     * --------------------------------------------------------
+     * RFU
+     *
+     * 2 bytes.
+     * --------------------------------------------------------
+     */
+    index += 2U;
+
+
+    /*
+     * --------------------------------------------------------
+     * TAG DATA LENGTH
+     *
+     * 2-byte bit length.
+     *
+     * For our inventory request this should be 0.
+     * --------------------------------------------------------
+     */
+    tagDataLength =
+        ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 1U];
+
+    index += 2U;
+
+
+    /*
+     * Tag-data length must be byte aligned.
+     */
+    if(
+        (tagDataLength % 8U) != 0U
+    )
+    {
+        return 0U;
+    }
+
+
+    /*
+     * Skip embedded tag data if present.
+     */
+    index +=
+        (uint16_t)(tagDataLength / 8U);
+
+
+    /*
+     * --------------------------------------------------------
+     * EPC LENGTH
+     *
+     * IMPORTANT:
+     *
+     * Async 0xAA uses ONE BYTE here.
+     *
+     * It is the total number of bytes:
+     *
+     *     PC + EPC + Tag CRC
+     *
+     * Therefore:
+     *
+     *     EPC bytes = length - 4
+     * --------------------------------------------------------
+     */
+    epcTotalBytes =
+        pSilionHandle->rxBuffer[index++];
+
+
+    if(epcTotalBytes < 4U)
+    {
+        return 0U;
+    }
+
+
+    epcBytes =
+        (uint16_t)epcTotalBytes - 4U;
+
+
+    if(
+        epcBytes > sizeof(tag->epc)
+    )
+    {
+        return 0U;
+    }
+
+
+    tag->epcLengthBits =
+        (uint16_t)epcTotalBytes * 8U;
+
+
+    tag->epcLengthBytes =
+        epcBytes;
+
+
+    /*
+     * --------------------------------------------------------
+     * PC WORD
+     * --------------------------------------------------------
+     */
+    tag->pcWord =
+        ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 1U];
+
+    index += 2U;
+
+
+    /*
+     * --------------------------------------------------------
+     * Make sure EPC + CRC actually fit.
+     * --------------------------------------------------------
+     */
+    if(
+        (index + epcBytes + 2U)
+        >
+        pSilionHandle->rxIndex
+    )
+    {
+        return 0U;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * EPC
+     * --------------------------------------------------------
+     */
+    for(
+        uint16_t i = 0U;
+        i < epcBytes;
+        i++
+    )
+    {
+        tag->epc[i] =
+            pSilionHandle->rxBuffer[index++];
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * TAG CRC
+     * --------------------------------------------------------
+     */
+    tag->tagCrc =
+        ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 1U];
+
+
+    return 1U;
+}
+
+uint8_t SILION_AsyncTagQueuePush(
+        Silion_Handle_t *pSilionHandle,
+        const SILION_Tag_t *tag)
+{
+    SILION_AsyncTagQueue_t *queue;
+
+
+    if(
+        pSilionHandle == NULL ||
+        tag == NULL
+    )
+    {
+        return 0U;
+    }
+
+
+    queue =
+        &pSilionHandle->asyncTagQueue;
+
+
+    /*
+     * Queue full.
+     */
+    if(
+        queue->count >=
+        SILION_ASYNC_TAG_QUEUE_SIZE
+    )
+    {
+        queue->overflow++;
+
+        return 0U;
+    }
+
+
+    /*
+     * Copy complete tag into queue.
+     */
+    queue->tags[queue->head] =
+        *tag;
+
+
+    /*
+     * Advance head.
+     */
+    queue->head++;
+
+    if(
+        queue->head >=
+        SILION_ASYNC_TAG_QUEUE_SIZE
+    )
+    {
+        queue->head = 0U;
+    }
+
+
+    queue->count++;
+
+
+    return 1U;
+}
+
+uint8_t SILION_AsyncTagQueuePop(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag)
+{
+    SILION_AsyncTagQueue_t *queue;
+
+
+    if(
+        pSilionHandle == NULL ||
+        tag == NULL
+    )
+    {
+        return 0U;
+    }
+
+
+    queue =
+        &pSilionHandle->asyncTagQueue;
+
+
+    /*
+     * Nothing available.
+     */
+    if(queue->count == 0U)
+    {
+        return 0U;
+    }
+
+
+    /*
+     * Copy tag out of queue.
+     */
+    *tag =
+        queue->tags[queue->tail];
+
+
+    /*
+     * Advance tail.
+     */
+    queue->tail++;
+
+    if(
+        queue->tail >=
+        SILION_ASYNC_TAG_QUEUE_SIZE
+    )
+    {
+        queue->tail = 0U;
+    }
+
+
+    queue->count--;
+
+
+    return 1U;
+}
 
 uint8_t SILION_ParseTagBuffer(
         Silion_Handle_t *pSilionHandle,
@@ -1200,6 +1667,8 @@ void SILION_ProcessByte(
         Silion_Handle_t *pSilionHandle,
         uint8_t receivedByte)
 {
+	SILION_Tag_t asyncTag;
+
     switch(pSilionHandle->rxState)
     {
         /*
@@ -1415,16 +1884,55 @@ void SILION_ProcessByte(
              * Full frame received.
              */
 
-            if(SILION_ValidateFrame(
-                    pSilionHandle))
+            if(
+                SILION_ValidateFrame(
+                    pSilionHandle
+                )
+            )
             {
-                pSilionHandle->frameReady =
-                    1;
+                /*
+                 * --------------------------------------------------------
+                 * ASYNCHRONOUS INVENTORY FRAME
+                 * --------------------------------------------------------
+                 *
+                 * 0xAA frames are unsolicited and may arrive continuously.
+                 *
+                 * Handle them immediately instead of treating them like
+                 * a normal request/reply transaction.
+                 */
+                if(
+                    pSilionHandle->command
+                    ==
+                    SILION_CMD_ASYNC_INVENTORY
+                )
+                {
+                	 SILION_ProcessAsyncFrame(
+                	        pSilionHandle,
+                	        &asyncTag);
+                }
+                else
+                {
+                    /*
+                     * Normal request/reply frame.
+                     */
+                    pSilionHandle->frameReady = 1;
+                }
             }
             else
             {
-                pSilionHandle->frameError =
-                    1;
+                pSilionHandle->frameError = 1;
+
+                /*
+                 * If this was an async packet, count it.
+                 */
+                if(
+                    pSilionHandle->command
+                    ==
+                    SILION_CMD_ASYNC_INVENTORY
+                )
+                {
+                    pSilionHandle->asyncBadPacketCount++;
+                }
             }
 
 
@@ -1449,6 +1957,8 @@ void SILION_ProcessByte(
             break;
     }
 }
+
+
 
 
 /*
