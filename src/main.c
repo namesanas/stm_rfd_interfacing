@@ -7,6 +7,32 @@
 #include "stm32f429xx_driver_uart.h"
 #include "impinj.h"
 
+/*
+ * Cortex-M4 SysTick registers. The project uses a custom STM32
+ * header without the CMSIS SysTick definitions, so access them
+ * directly here.
+ */
+#define SYST_CSR   (*(volatile uint32_t *)0xE000E010UL)
+#define SYST_RVR   (*(volatile uint32_t *)0xE000E014UL)
+#define SYST_CVR   (*(volatile uint32_t *)0xE000E018UL)
+
+#define SYST_CSR_ENABLE       (1UL << 0)
+#define SYST_CSR_TICKINT      (1UL << 1)
+#define SYST_CSR_CLKSOURCE    (1UL << 2)
+
+#define SILION_ASYNC_MARKER_0  'M'
+#define SILION_ASYNC_MARKER_1  'o'
+#define SILION_ASYNC_MARKER_2  'd'
+#define SILION_ASYNC_MARKER_3  'u'
+#define SILION_ASYNC_MARKER_4  'l'
+#define SILION_ASYNC_MARKER_5  'e'
+#define SILION_ASYNC_MARKER_6  't'
+#define SILION_ASYNC_MARKER_7  'e'
+#define SILION_ASYNC_MARKER_8  'c'
+#define SILION_ASYNC_MARKER_9  'h'
+
+#define SILION_ASYNC_SUBCMD_START  0xAA48U
+
 extern void initialise_monitor_handles(void);
 
 
@@ -54,7 +80,8 @@ extern void initialise_monitor_handles(void);
 USART_Handle_t usart3;
 Silion_Handle_t silion;
 
-
+SILION_Tag_t lastAsyncTag;
+volatile uint8_t newAsyncTagAvailable = 0U;
 /*
  * ============================================================
  * APPLICATION FLAGS
@@ -73,6 +100,12 @@ volatile uint8_t rxORE = 0;
 volatile uint8_t rxFE  = 0;
 volatile uint8_t rxNE  = 0;
 volatile uint8_t rxPE  = 0;
+
+volatile uint32_t silionAsyncPacketCount = 0;
+volatile uint32_t silionAsyncBadFrameCount = 0;
+
+/* 1 ms software time base */
+volatile uint32_t g_msTick = 0;
 
 
 /*
@@ -321,6 +354,133 @@ void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEven
     }
 }
 
+static uint8_t SILION_StartAsyncInventory(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t data[19];
+    static uint8_t frame[24];
+
+    uint8_t index;
+    uint8_t subCrc;
+    uint16_t frameLength;
+
+
+    index = 0U;
+
+
+    /*
+     * --------------------------------------------------------
+     * Subcommand marker = "Moduletech"
+     * --------------------------------------------------------
+     */
+    data[index++] = 'M';
+    data[index++] = 'o';
+    data[index++] = 'd';
+    data[index++] = 'u';
+    data[index++] = 'l';
+    data[index++] = 'e';
+    data[index++] = 't';
+    data[index++] = 'e';
+    data[index++] = 'c';
+    data[index++] = 'h';
+
+
+    /*
+     * --------------------------------------------------------
+     * Subcommand = 0xAA48
+     * --------------------------------------------------------
+     */
+    data[index++] = 0xAAU;
+    data[index++] = 0x48U;
+
+
+    /*
+     * --------------------------------------------------------
+     * Metadata Flags = 0x00BF
+     * --------------------------------------------------------
+     */
+    data[index++] = 0x00U;
+    data[index++] = 0xBFU;
+
+
+    /*
+     * --------------------------------------------------------
+     * Option = 0x00
+     *
+     * No filter.
+     * --------------------------------------------------------
+     */
+    data[index++] = 0x00U;
+
+
+    /*
+     * --------------------------------------------------------
+     * Search Flags = 0x0000
+     *
+     * No duty-cycle reduction.
+     * No heartbeat.
+     * No automatic stop.
+     * --------------------------------------------------------
+     */
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+
+
+    /*
+     * --------------------------------------------------------
+     * SubCRC
+     *
+     * Add from Subcommand Code through Subcommand Data.
+     *
+     * That starts at data[10].
+     * --------------------------------------------------------
+     */
+    subCrc = 0U;
+
+    for(
+        uint8_t i = 10U;
+        i < index;
+        i++
+    )
+    {
+        subCrc =
+            (uint8_t)(
+                subCrc +
+                data[i]
+            );
+    }
+
+
+    data[index++] = subCrc;
+
+
+    /*
+     * --------------------------------------------------------
+     * Terminator
+     * --------------------------------------------------------
+     */
+    data[index++] = 0xBBU;
+
+
+    /*
+     * index should now be 19.
+     */
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_ASYNC_INVENTORY,
+            data,
+            index,
+            frame
+        );
+
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
 
 /*
  * ============================================================
@@ -353,106 +513,6 @@ static void SILION_ProcessRxQueue(void)
 
         SILION_ProcessByte(&silion,byte);
     }
-}
-
-
-/*
- * ============================================================
- * WAIT FOR SILION RESPONSE
- *
- * This function contains NO printf().
- *
- * It continuously drains the RX queue while waiting so that
- * incoming bytes are processed immediately.
- *
- * Return:
- *
- *     1 = complete valid frame
- *     0 = timeout
- *    -1 = UART error
- *    -2 = SILION frame error
- *
- * ============================================================
- */
-
-static int SILION_WaitForResponse(uint32_t timeout)
-{
-    while(timeout--)
-    {
-        /*
-         * Process any received bytes.
-         */
-        SILION_ProcessRxQueue();
-
-
-        /*
-         * UART errors.
-         */
-        if(rxORE ||rxFE ||rxNE ||rxPE)
-        {
-            return -1;
-        }
-
-
-        /*
-         * SILION parser rejected frame.
-         */
-        if(silion.frameError)
-        {
-            return -2;
-        }
-
-
-        /*
-         * Complete valid frame.
-         */
-        if(SILION_IsFrameReady(&silion) )
-        {
-            return 1;
-        }
-    }
-
-
-    return 0;
-}
-
-
-/*
- * ============================================================
- * WAIT FOR TX COMPLETE
- *
- * No printf().
- *
- * Also process RX queue while waiting.
- *
- * ============================================================
- */
-
-static int SILION_WaitForTxComplete(
-        uint32_t timeout)
-{
-    while(timeout--)
-    {
-        /*
-         * RX may arrive before TC.
-         */
-        SILION_ProcessRxQueue();
-
-
-        if(rxORE ||rxFE ||rxNE ||rxPE)
-        {
-            return -1;
-        }
-
-
-        if(txComplete)
-        {
-            return 1;
-        }
-    }
-
-
-    return 0;
 }
 
 
@@ -497,24 +557,157 @@ static void SILION_ClearRxQueue(void)
 
 /*
  * ============================================================
- * SIMPLE DELAY
- *
- * Approximate delay.
- *
- * The 500 ms value required by the protocol should ideally be
- * replaced by your project's timer/SysTick delay once we have
- * that available.
+ * TIME BASE
  * ============================================================
  */
 
-static void SILION_Delay500ms(void)
+static uint32_t SILION_GetHCLKHz(void)
 {
-    volatile uint32_t delay;
+    uint32_t pclk1;
+    uint32_t ppre1;
+    uint32_t apb1Prescaler;
 
+    pclk1 = RCC_GetPCLK1Value();
+    ppre1 = (RCC->CFGR >> 10U) & 0x07U;
 
-    for(delay = 0;delay < 50000000UL;delay++)
+    switch(ppre1)
     {
+        case 0U:
+        case 1U:
+        case 2U:
+        case 3U:
+            apb1Prescaler = 1U;
+            break;
+
+        case 4U:
+            apb1Prescaler = 2U;
+            break;
+
+        case 5U:
+            apb1Prescaler = 4U;
+            break;
+
+        case 6U:
+            apb1Prescaler = 8U;
+            break;
+
+        default:
+            apb1Prescaler = 16U;
+            break;
     }
+
+    return pclk1 * apb1Prescaler;
+}
+
+
+static void SILION_SysTick_Init(void)
+{
+    uint32_t hclkHz;
+
+    hclkHz = SILION_GetHCLKHz();
+
+    if(hclkHz < 1000U)
+    {
+        hclkHz = 16000000UL;
+    }
+
+    g_msTick = 0U;
+
+    SYST_RVR = (hclkHz / 1000U) - 1U;
+    SYST_CVR = 0U;
+    SYST_CSR = SYST_CSR_CLKSOURCE |
+               SYST_CSR_TICKINT   |
+               SYST_CSR_ENABLE;
+}
+
+
+void SysTick_Handler(void)
+{
+    g_msTick++;
+}
+
+
+static void SILION_DelayMs(uint32_t delayMs)
+{
+    uint32_t start;
+
+    start = g_msTick;
+
+    while((g_msTick - start) < delayMs)
+    {
+        SILION_ProcessRxQueue();
+    }
+}
+
+
+/*
+ * ============================================================
+ * WAIT FOR SILION RESPONSE
+ *
+ * timeout is now in REAL MILLISECONDS.
+ * ============================================================
+ */
+
+static int SILION_WaitForResponse(uint32_t timeoutMs)
+{
+    uint32_t start;
+
+    start = g_msTick;
+
+    while((g_msTick - start) < timeoutMs)
+    {
+        SILION_ProcessRxQueue();
+
+        if(rxORE || rxFE || rxNE || rxPE)
+        {
+            return -1;
+        }
+
+        if(silion.frameError)
+        {
+            return -2;
+        }
+
+        if(SILION_IsFrameReady(&silion))
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+
+/*
+ * ============================================================
+ * WAIT FOR TX COMPLETE
+ *
+ * timeout is now in REAL MILLISECONDS.
+ * ============================================================
+ */
+
+static int SILION_WaitForTxComplete(uint32_t timeoutMs)
+{
+    uint32_t start;
+
+    start = g_msTick;
+
+    while((g_msTick - start) < timeoutMs)
+    {
+        SILION_ProcessRxQueue();
+
+        if(rxORE || rxFE || rxNE || rxPE)
+        {
+            return -1;
+        }
+
+        if(txComplete)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 
@@ -576,6 +769,8 @@ int main(void)
 
     initialise_monitor_handles();
 
+    SILION_SysTick_Init();
+
 
     printf("\r\n");
     printf("========================================\r\n");
@@ -596,9 +791,7 @@ int main(void)
     /*
      * Give the module time to initialize.
      */
-    for(volatile uint32_t delay = 0;delay < 5000000UL;delay++)
-    {
-    }
+    SILION_DelayMs(100U);
 
 
     /*
@@ -692,7 +885,7 @@ int main(void)
      *
      * Wait for TX while continuing to process RX.
      */
-    result =SILION_WaitForTxComplete(100000000UL);
+    result =SILION_WaitForTxComplete(100U);
 
 
     if(result <= 0)
@@ -708,7 +901,7 @@ int main(void)
     /*
      * NO PRINTF DURING RESPONSE.
      */
-    result = SILION_WaitForResponse(100000000UL);
+    result = SILION_WaitForResponse(1000U);
 
 
     if(result != 1)
@@ -794,7 +987,7 @@ int main(void)
     /*
      * NO PRINTF.
      */
-    result =SILION_WaitForTxComplete(100000000UL);
+    result =SILION_WaitForTxComplete(100U);
 
 
     if(result <= 0)
@@ -810,7 +1003,7 @@ int main(void)
     /*
      * NO PRINTF.
      */
-    result = SILION_WaitForResponse( 100000000UL);
+    result = SILION_WaitForResponse(1000U);
 
 
     if(result != 1)
@@ -866,7 +1059,7 @@ int main(void)
     SILION_ClearUartFlags();
 
 
-    SILION_Delay500ms();
+    SILION_DelayMs(500U);
 
 
     /*
@@ -908,7 +1101,7 @@ int main(void)
     /*
      * NO PRINTF.
      */
-    result =SILION_WaitForTxComplete(100000000UL);
+    result =SILION_WaitForTxComplete(100U);
 
 
     if(result <= 0)
@@ -924,7 +1117,7 @@ int main(void)
     /*
      * NO PRINTF.
      */
-    result =SILION_WaitForResponse(100000000UL );
+    result =SILION_WaitForResponse(1000U);
 
 
     if(result != 1)
@@ -1027,7 +1220,7 @@ int main(void)
          *
          * Wait for TX completion.
          */
-        result =SILION_WaitForTxComplete(100000000UL);
+        result =SILION_WaitForTxComplete(100U);
 
 
         if(result <= 0)
@@ -1045,7 +1238,7 @@ int main(void)
          *
          * Wait for complete response.
          */
-        result =SILION_WaitForResponse(100000000UL);
+        result =SILION_WaitForResponse(1000U);
 
 
         if(result != 1)
@@ -1109,7 +1302,7 @@ int main(void)
         /*
          * NO PRINTF HERE.
          */
-        result =SILION_WaitForTxComplete(100000000UL);
+        result =SILION_WaitForTxComplete(100U);
 
         if(result <= 0)
         {
@@ -1124,7 +1317,7 @@ int main(void)
         /*
          * NO PRINTF HERE.
          */
-        result =SILION_WaitForResponse(100000000UL);
+        result =SILION_WaitForResponse(1000U);
 
         if(result != 1)
         {
@@ -1194,7 +1387,7 @@ int main(void)
         /*
          * NO PRINTF HERE
          */
-        result = SILION_WaitForTxComplete(100000000UL);
+        result = SILION_WaitForTxComplete(100U);
 
 
         if(result <= 0)
@@ -1210,7 +1403,7 @@ int main(void)
         /*
          * NO PRINTF HERE
          */
-        result =SILION_WaitForResponse( 100000000UL);
+        result =SILION_WaitForResponse(1000U);
 
 
         if(result != 1)
@@ -1282,7 +1475,7 @@ int main(void)
 
         result =
             SILION_WaitForTxComplete(
-                100000000UL
+                100U
             );
 
         if(result <= 0)
@@ -1303,7 +1496,7 @@ int main(void)
 
         result =
             SILION_WaitForResponse(
-                100000000UL
+                1000U
             );
 
         if(result != 1)
@@ -1388,7 +1581,7 @@ int main(void)
         /*
          * NO PRINTF HERE
          */
-        result = SILION_WaitForTxComplete( 100000000UL );
+        result = SILION_WaitForTxComplete(100U);
 
 
         if(result <= 0)
@@ -1404,7 +1597,7 @@ int main(void)
         /*
          * NO PRINTF HERE
          */
-        result =SILION_WaitForResponse( 100000000UL );
+        result =SILION_WaitForResponse(1000U);
 
 
         if(result != 1)
@@ -1486,7 +1679,7 @@ int main(void)
 
         result =
             SILION_WaitForTxComplete(
-                100000000UL
+                100U
             );
 
         if(result <= 0)
@@ -1511,7 +1704,7 @@ int main(void)
 
         result =
             SILION_WaitForResponse(
-                100000000UL
+                12000U
             );
 
         if(result != 1)
@@ -1653,7 +1846,7 @@ int main(void)
 
             result =
                 SILION_WaitForTxComplete(
-                    100000000UL
+                    100U
                 );
 
 
@@ -1677,7 +1870,7 @@ int main(void)
 
             result =
                 SILION_WaitForResponse(
-                    100000000UL
+                    1000U
                 );
 
 
@@ -1837,10 +2030,135 @@ int main(void)
     );
 
 
-    while(1)
+    /*
+     * ============================================================
+     * STAGE 1
+     *
+     * START ASYNCHRONOUS INVENTORY
+     *
+     * No printf() after this command while RFID frames
+     * are continuously arriving.
+     * ============================================================
+     */
+
+    SILION_ClearFrame(
+        &silion
+    );
+
+    SILION_ClearUartFlags();
+
+    txComplete = 0;
+
+    silionAsyncPacketCount = 0;
+    silionAsyncBadFrameCount = 0;
+
+
+    /*
+     * Start 0xAA48.
+     */
+    if(
+        SILION_StartAsyncInventory(
+            &silion
+        ) == 0
+    )
     {
+        printf(
+            "ERROR: Async Inventory TX failed.\r\n"
+        );
+
+        while(1)
+        {
+        }
     }
 
+
+    /*
+     * Wait ONLY for the initial command TX.
+     *
+     * The module does not return a normal inventory-complete
+     * response here. Async inventory starts streaming afterward.
+     */
+    result =
+        SILION_WaitForTxComplete(
+            100U
+        );
+
+    if(result <= 0)
+    {
+        printf(
+            "ERROR: Async Inventory TX timeout.\r\n"
+        );
+
+        while(1)
+        {
+        }
+    }
+
+
+    printf(
+        "\r\nAsync Inventory START sent.\r\n"
+    );
+
+    printf(
+        "Receiving asynchronous RFID frames...\r\n"
+    );
+
+
+    /*
+     * IMPORTANT:
+     *
+     * Do NOT call SILION_WaitForResponse() here.
+     *
+     * Async inventory has unsolicited frames.
+     */
+    //SILION_Tag_t asyncTag;
+    while(1)
+    {
+        SILION_ProcessRxQueue();
+
+
+        SILION_Tag_t asyncTag;
+
+        while(
+            SILION_AsyncTagQueuePop(
+                &silion,
+                &asyncTag
+            )
+        )
+        {
+            printf(
+                "TAG EPC: "
+            );
+
+            for(
+                uint16_t i = 0U;
+                i < asyncTag.epcLengthBytes;
+                i++
+            )
+            {
+                printf(
+                    "%02X",
+                    asyncTag.epc[i]
+                );
+            }
+
+            printf(
+                " | RSSI: %d dBm"
+                " | ANT: %u"
+                " | READS: %u"
+                " | FREQ: %lu kHz"
+                " | TIME: %lu ms\r\n",
+
+                asyncTag.rssi,
+                asyncTag.antenna,
+                asyncTag.readCount,
+
+                (unsigned long)asyncTag.frequencyKHz,
+
+                (unsigned long)asyncTag.timestampMs
+            );
+        }
+    }
 
 
     /*
