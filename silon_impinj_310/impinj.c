@@ -384,6 +384,189 @@ uint8_t SILION_GetRunPhase(
     );
 }
 
+uint8_t SILION_GetTagProtocol(
+        Silion_Handle_t *pSilionHandle)
+{
+	static uint8_t frame[8];
+	    uint16_t frameLength;
+
+	    frameLength =
+	        SILION_BuildCommandFrame(
+	            SILION_CMD_GET_TAG_PROTOCOL,
+	            NULL,
+	            0U,
+	            frame
+	        );
+
+	    return SILION_SendFrame(
+	        pSilionHandle,
+	        frame,
+	        frameLength
+	    );
+}
+uint8_t SILION_GetCurrentRegion(
+        Silion_Handle_t *pSilionHandle)
+{
+	  static uint8_t frame[8];
+	    uint16_t frameLength;
+
+	    frameLength =
+	        SILION_BuildCommandFrame(
+	            SILION_CMD_GET_CURRENT_REGION,
+	            NULL,
+	            0U,
+	            frame
+	        );
+
+	    return SILION_SendFrame(
+	        pSilionHandle,
+	        frame,
+	        frameLength
+	    );
+}
+uint8_t SILION_GetTemperature(
+        Silion_Handle_t *pSilionHandle)
+{
+   static  uint8_t frame[8];
+    uint16_t frameLength;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_TEMPERATURE,
+            NULL,
+            0U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_GetAntennaPorts(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t option)
+{
+    static uint8_t data[1];
+    static uint8_t frame[9];
+
+    uint16_t frameLength;
+
+    data[0] = option;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_ANTENNA_PORTS,
+            data,
+            1U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_GetProtocolConfiguration(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t protocol,
+        uint8_t parameter)
+{
+    static uint8_t data[2];
+    static uint8_t frame[9];
+
+    uint16_t frameLength;
+
+    data[0] = protocol;
+    data[1] = parameter;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_PROTOCOL_CONFIG,
+            data,
+            2U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_GetFrequencyHopping(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t frame[8];
+    uint16_t frameLength;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_FREQUENCY_HOPPING,
+            NULL,
+            0U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_GetAvailableRegions(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t frame[8];
+    uint16_t frameLength;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_AVAILABLE_REGIONS,
+            NULL,
+            0U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_GetSerialNumber(
+        Silion_Handle_t *pSilionHandle)
+{
+    static uint8_t data[2];
+    static uint8_t frame[9];
+
+    uint16_t frameLength;
+
+    data[0] = 0x00U;
+    data[1] = 0x00U;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_GET_SERIAL_NUMBER,
+            data,
+            2U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
 /*
  * ============================================================
  * SET CURRENT REGION
