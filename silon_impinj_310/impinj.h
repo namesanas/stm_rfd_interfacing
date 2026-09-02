@@ -62,6 +62,7 @@
 #define SILION_CMD_GET_VERSION       0x03U
 #define SILION_CMD_BOOT_FIRMWARE     0x04U
 #define SILION_CMD_GET_RUN_PHASE     0x0CU
+#define SILION_CMD_GET_SERIAL_NUMBER 0x10U
 
 #define SILION_CMD_SINGLE_INVENTORY  0x21U
 #define SILION_CMD_SYNC_INVENTORY    0x22U
@@ -108,6 +109,20 @@
 #define SILION_CMD_ASYNC_INVENTORY  0xAAU
 
 #define SILION_ASYNC_TAG_QUEUE_SIZE 32U
+
+#define SILION_CMD_GET_TAG_PROTOCOL       0x63U
+#define SILION_CMD_GET_CURRENT_REGION     0x67U
+#define SILION_CMD_GET_TEMPERATURE        0x72U
+
+#define SILION_CMD_GET_ANTENNA_PORTS    0x61U
+#define SILION_CMD_GET_PROTOCOL_CONFIG    0x6BU
+
+#define SILION_CMD_GET_FREQUENCY_HOPPING   0x65U
+#define SILION_CMD_GET_AVAILABLE_REGIONS   0x71U
+
+#define SILION_PROTOCOL_PARAM_TARGET    0x01U
+#define SILION_PROTOCOL_PARAM_MILLER    0x02U
+#define SILION_PROTOCOL_PARAM_Q        0x12U
 
 
 
@@ -232,6 +247,27 @@ typedef struct
 
 /*
  * ============================================================
+ * READER CONFIGURATION
+ * ============================================================
+ */
+
+typedef struct
+{
+    uint8_t  region;
+
+    uint8_t  txAntenna;
+    uint8_t  rxAntenna;
+
+    uint16_t readPower;
+    uint16_t writePower;
+
+    uint8_t  tagProtocol;
+    uint8_t  session;
+
+} SILION_ReaderConfig_t;
+
+/*
+ * ============================================================
  * CRC
  * ============================================================
  */
@@ -290,6 +326,25 @@ uint8_t SILION_BootFirmware(
         Silion_Handle_t *pSilionHandle);
 
 uint8_t SILION_GetRunPhase(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetTagProtocol(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetCurrentRegion(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetTemperature(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetAntennaPorts(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t option);
+uint8_t SILION_GetProtocolConfiguration(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t protocol,
+        uint8_t parameter);
+uint8_t SILION_GetFrequencyHopping(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetAvailableRegions(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetSerialNumber(
         Silion_Handle_t *pSilionHandle);
 uint8_t SILION_SetRegion(
         Silion_Handle_t *pSilionHandle,
