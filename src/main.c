@@ -1,6 +1,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "stm32f429xx.h"
 #include "stm32f429xx_driver_gpio.h"
@@ -79,6 +80,17 @@ extern void initialise_monitor_handles(void);
 
 USART_Handle_t usart3;
 Silion_Handle_t silion;
+USART_Handle_t usart1;
+SILION_ReaderConfig_t readerConfig;
+
+#define VCP_TX_BUFFER_SIZE 2048U
+
+static uint8_t vcpTxBuffer[VCP_TX_BUFFER_SIZE];
+static volatile uint16_t vcpTxHead = 0U;
+static volatile uint16_t vcpTxTail = 0U;
+
+static volatile uint8_t vcpTxBusy = 0U;
+static volatile uint16_t vcpTxActiveLen = 0U;
 
 SILION_Tag_t lastAsyncTag;
 volatile uint8_t newAsyncTagAvailable = 0U;
@@ -211,6 +223,64 @@ static void USART3_GPIO_Init(void)
     GPIO_Init(&gpio);
 }
 
+static void USART1_GPIO_Init(void)
+{
+    GPIO_Handle_t gpio;
+
+
+    /*
+     * PA9 -> USART1_TX -> ST-LINK VCP RX
+     */
+    gpio.pGPIOx = GPIOA;
+
+    gpio.GPIO_PinConfig.GPIO_PinNumber =
+        GPIO_PIN_NO_9;
+
+    gpio.GPIO_PinConfig.GPIO_PinMode =
+        GPIO_MODE_ALTFN;
+
+    gpio.GPIO_PinConfig.GPIO_PinSpeed =
+        GPIO_SPEED_FAST;
+
+    gpio.GPIO_PinConfig.GPIO_PuPdControl =
+        GPIO_PIN_PU;
+
+    gpio.GPIO_PinConfig.GPIO_PinOPType =
+        GPIO_OP_TYPE_PP;
+
+    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
+        7;
+
+    GPIO_Init(&gpio);
+
+
+    /*
+     * PA10 -> USART1_RX
+     *
+     * We don't need RX yet, but initialize it so the
+     * USART is configured as a normal TX/RX peripheral.
+     */
+    gpio.GPIO_PinConfig.GPIO_PinNumber =
+        GPIO_PIN_NO_10;
+
+    gpio.GPIO_PinConfig.GPIO_PinMode =
+        GPIO_MODE_ALTFN;
+
+    gpio.GPIO_PinConfig.GPIO_PinSpeed =
+        GPIO_SPEED_FAST;
+
+    gpio.GPIO_PinConfig.GPIO_PuPdControl =
+        GPIO_PIN_PU;
+
+    gpio.GPIO_PinConfig.GPIO_PinOPType =
+        GPIO_OP_TYPE_PP;
+
+    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
+        7;
+
+    GPIO_Init(&gpio);
+}
+
 
 /*
  * ============================================================
@@ -240,6 +310,37 @@ static void USART3_Init(void)
     USART_Init(&usart3);
 }
 
+static void USART1_Init(void)
+{
+    usart1.pUSARTx =
+        USART1;
+
+
+    usart1.USART_Config.USART_Mode =
+        USART_MODE_TXRX;
+
+    usart1.USART_Config.USART_Baud =
+        USART_STD_BAUD_115200;
+
+    usart1.USART_Config.USART_NoOfStopBits =
+        USART_STOPBITS_1;
+
+    usart1.USART_Config.USART_WordLength =
+        USART_WORDLEN_8BITS;
+
+    usart1.USART_Config.USART_ParityControl =
+        USART_PARITY_DISABLE;
+
+    usart1.USART_Config.USART_HWFlowControl =
+        USART_HW_FLOW_CTRL_NONE;
+
+    usart1.USART_Config.USART_OverSampling =
+        USART_OVERSAMPLING_16;
+
+
+    USART_Init(&usart1);
+}
+
 
 /*
  * ============================================================
@@ -252,6 +353,10 @@ void USART3_IRQHandler(void)
     USART_IRQHandling(&usart3);
 }
 
+void USART1_IRQHandler(void)
+{
+    USART_IRQHandling(&usart1);
+}
 
 /*
  * ============================================================
@@ -269,7 +374,64 @@ void USART3_IRQHandler(void)
 
 void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent,uint8_t receivedByte)
 {
-    (void)pUSARTHandle;
+
+    if (pUSARTHandle == &usart1)
+    {
+        if (AppEvent == USART_EVENT_TX_CMPLT)
+        {
+            /*
+             * Previous block has finished transmitting.
+             */
+            vcpTxTail =
+                (uint16_t)(
+                    (vcpTxTail + vcpTxActiveLen)
+                    % VCP_TX_BUFFER_SIZE
+                );
+
+            vcpTxActiveLen = 0U;
+
+            /*
+             * Anything remaining in the queue?
+             */
+            if (vcpTxTail != vcpTxHead)
+            {
+                uint16_t len;
+
+                /*
+                 * Keep this transmission contiguous.
+                 */
+                if (vcpTxHead > vcpTxTail)
+                {
+                    len = (uint16_t)(
+                        vcpTxHead - vcpTxTail
+                    );
+                }
+                else
+                {
+                    len = (uint16_t)(
+                        VCP_TX_BUFFER_SIZE - vcpTxTail
+                    );
+                }
+
+                vcpTxActiveLen = len;
+
+                USART_SendDataIT(
+                    &usart1,
+                    &vcpTxBuffer[vcpTxTail],
+                    len
+                );
+            }
+            else
+            {
+                /*
+                 * Nothing left to transmit.
+                 */
+                vcpTxBusy = 0U;
+            }
+        }
+
+        return;
+    }
 
 
     /*
@@ -352,6 +514,13 @@ void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEven
     {
         rxPE = 1;
     }
+
+
+
+
+    /*
+     * Existing USART3 handling continues below.
+     */
 }
 
 static uint8_t SILION_StartAsyncInventory(
@@ -747,6 +916,105 @@ static void PrintSilionFrame(void)
     printf("\r\n");
 }
 
+void VCP_SendString(const char *text)
+{
+    uint16_t i = 0U;
+
+    if (text == NULL)
+    {
+        return;
+    }
+
+    while (text[i] != '\0')
+    {
+        uint16_t nextHead =
+            (uint16_t)((vcpTxHead + 1U) % VCP_TX_BUFFER_SIZE);
+
+        /* Buffer full */
+        if (nextHead == vcpTxTail)
+        {
+            return;
+        }
+
+        vcpTxBuffer[vcpTxHead] = (uint8_t)text[i];
+        vcpTxHead = nextHead;
+        i++;
+    }
+
+    /*
+     * Start transmission if USART1 is currently idle.
+     */
+    if (!vcpTxBusy && (vcpTxTail != vcpTxHead))
+    {
+        uint16_t len;
+
+        /*
+         * Calculate contiguous bytes available from tail.
+         */
+        if (vcpTxHead > vcpTxTail)
+        {
+            len = (uint16_t)(vcpTxHead - vcpTxTail);
+        }
+        else
+        {
+            len = (uint16_t)(VCP_TX_BUFFER_SIZE - vcpTxTail);
+        }
+
+        vcpTxActiveLen = len;
+        vcpTxBusy = 1U;
+
+        USART_SendDataIT(
+            &usart1,
+            &vcpTxBuffer[vcpTxTail],
+            len
+        );
+    }
+}
+
+static void VCP_SendTag(const SILION_Tag_t *tag)
+{
+    char buffer[160];
+
+    uint16_t pos = 0U;
+
+
+    pos +=
+        sprintf(
+            &buffer[pos],
+            "TAG,EPC="
+        );
+
+
+    for(
+        uint16_t i = 0U;
+        i < tag->epcLengthBytes;
+        i++
+    )
+    {
+        pos +=
+            sprintf(
+                &buffer[pos],
+                "%02X",
+                tag->epc[i]
+            );
+    }
+
+
+    pos +=
+        sprintf(
+            &buffer[pos],
+            ",RSSI=%d,ANT=%u,FREQ=%lu,TIME=%lu\r\n",
+            tag->rssi,
+            tag->antenna,
+            (unsigned long)tag->frequencyKHz,
+            (unsigned long)tag->timestampMs
+        );
+
+
+    VCP_SendString(
+        buffer
+    );
+}
 
 /*
  * ============================================================
@@ -801,7 +1069,7 @@ int main(void)
      */
 
     USART3_GPIO_Init();
-
+    USART1_GPIO_Init();
 
     /*
      * --------------------------------------------------------
@@ -810,6 +1078,7 @@ int main(void)
      */
 
     USART3_Init();
+    USART1_Init();
 
 
     /*
@@ -820,7 +1089,17 @@ int main(void)
 
     SILION_Init(&silion, &usart3);
 
+    readerConfig.region      = SILION_REGION_FULL_BAND;
 
+    readerConfig.txAntenna   = 1U;
+    readerConfig.rxAntenna   = 1U;
+
+    readerConfig.readPower   = 3000U;
+    readerConfig.writePower  = 3000U;
+
+    readerConfig.tagProtocol = SILION_TAG_PROTOCOL_GEN2;
+
+    readerConfig.session     = SILION_SESSION_0;
     /*
      * --------------------------------------------------------
      * 5. USART IRQ
@@ -832,7 +1111,8 @@ int main(void)
 
     USART_IRQInterruptConfig(IRQ_NO_USART3,ENABLE );
 
-
+    USART_IRQPriorityConfig(IRQ_NO_USART1,5);
+    USART_IRQInterruptConfig(IRQ_NO_USART1,ENABLE);
     /*
      * --------------------------------------------------------
      * 6. CLEAR QUEUE / FLAGS
@@ -1212,7 +1492,7 @@ int main(void)
 
         txComplete = 0;
 
-        SILION_SetRegion( &silion,SILION_REGION_FULL_BAND );
+        SILION_SetRegion(&silion, readerConfig.region);
 
 
         /*
@@ -1296,7 +1576,11 @@ int main(void)
 
         txComplete = 0;
 
-        SILION_SetInventoryAntenna(&silion, 1,1);
+        SILION_SetInventoryAntenna(
+            &silion,
+            readerConfig.txAntenna,
+            readerConfig.rxAntenna
+        );
 
 
         /*
@@ -1381,7 +1665,12 @@ int main(void)
         txComplete = 0;
 
 
-        SILION_SetAntennaPower(&silion, 1,3000,3000);
+        SILION_SetAntennaPower(
+            &silion,
+            readerConfig.txAntenna,
+            readerConfig.readPower,
+            readerConfig.writePower
+        );
 
 
         /*
@@ -1575,7 +1864,10 @@ int main(void)
         txComplete = 0;
 
 
-        SILION_SetProtocolSession(&silion,SILION_SESSION_0);
+        SILION_SetProtocolSession(
+            &silion,
+            readerConfig.session
+        );
 
 
         /*
@@ -2029,6 +2321,696 @@ int main(void)
         "\r\nSynchronous Inventory test complete.\r\n"
     );
 
+    /*
+     * ============================================================
+     * STAGE 2A TEST
+     * GET CURRENT REGION
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetCurrentRegion(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Current Region TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Current Region response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Current Region = 0x%02X\r\n",
+        silion.rxBuffer[5]
+    );
+
+    SILION_ClearFrame(&silion);
+
+
+    /*
+     * ============================================================
+     * GET TAG PROTOCOL
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetTagProtocol(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Tag Protocol TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Tag Protocol response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Current Tag Protocol = 0x%02X%02X\r\n",
+        silion.rxBuffer[5],
+        silion.rxBuffer[6]
+    );
+
+    SILION_ClearFrame(&silion);
+
+
+    /*
+     * ============================================================
+     * GET TEMPERATURE
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetTemperature(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Temperature TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Temperature response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Reader Temperature = %d C\r\n",
+        (int8_t)silion.rxBuffer[5]
+    );
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * STAGE 2B
+     * GET INVENTORY ANTENNA PORTS
+     * Option 0x02
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetAntennaPorts(
+        &silion,
+        0x02U
+    );
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Antenna Ports TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Antenna Ports response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetCommand(&silion) != SILION_CMD_GET_ANTENNA_PORTS)
+    {
+        printf("ERROR: Wrong Antenna Ports response command.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Antenna Ports failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    /*
+     * Response data:
+     *
+     * rxBuffer[5] = option
+     * rxBuffer[6] = TX antenna
+     * rxBuffer[7] = RX antenna
+     *
+     * If more antenna pairs are returned, they continue
+     * in TX/RX pairs.
+     */
+
+    printf(
+        "Inventory Antenna: TX=%u RX=%u\r\n",
+        silion.rxBuffer[6],
+        silion.rxBuffer[7]
+    );
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     *
+     *
+     * get protocol
+     * 0x6B
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetProtocolConfiguration(
+        &silion,
+        SILION_PROTOCOL_GEN2,
+        SILION_PROTOCOL_PARAM_SESSION
+    );
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Protocol Config TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Protocol Config response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetCommand(&silion) != SILION_CMD_GET_PROTOCOL_CONFIG)
+    {
+        printf("ERROR: Wrong Protocol Config response command.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Protocol Config failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Gen2 Session = %u\r\n",
+        silion.rxBuffer[7]
+    );
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET FREQUENCY HOPPING
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetFrequencyHopping(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Frequency Hopping TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Frequency Hopping response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetCommand(&silion) != SILION_CMD_GET_FREQUENCY_HOPPING)
+    {
+        printf("ERROR: Wrong Frequency Hopping response command.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Frequency Hopping failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    /*
+     * Response data consists of 4-byte frequencies.
+     */
+
+    uint8_t hopCount =
+        (uint8_t)(silion.expectedLength / 4U);
+
+    printf(
+        "Frequency Hop Channels = %u\r\n",
+        hopCount
+    );
+
+    for(uint8_t i = 0U; i < hopCount; i++)
+    {
+        uint16_t index =
+            (uint16_t)(5U + (i * 4U));
+
+        uint32_t frequency =
+            ((uint32_t)silion.rxBuffer[index] << 24) |
+            ((uint32_t)silion.rxBuffer[index + 1U] << 16) |
+            ((uint32_t)silion.rxBuffer[index + 2U] << 8) |
+            (uint32_t)silion.rxBuffer[index + 3U];
+
+        printf(
+            "  CH%u = %lu kHz\r\n",
+            (unsigned)(i + 1U),
+            (unsigned long)frequency
+        );
+    }
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET AVAILABLE REGIONS
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetAvailableRegions(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Available Regions TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Available Regions response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetCommand(&silion) != SILION_CMD_GET_AVAILABLE_REGIONS)
+    {
+        printf("ERROR: Wrong Available Regions response command.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Available Regions failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    printf("Available Regions:\r\n");
+
+    for(uint16_t i = 0U; i < silion.expectedLength; i++)
+    {
+        printf(
+            "  Region[%u] = 0x%02X\r\n",
+            (unsigned)i,
+            silion.rxBuffer[5U + i]
+        );
+    }
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET SERIAL NUMBER
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetSerialNumber(&silion);
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Serial Number TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Serial Number response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetCommand(&silion) != SILION_CMD_GET_SERIAL_NUMBER)
+    {
+        printf("ERROR: Wrong Serial Number response command.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Serial Number failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    printf("Reader Year: ");
+
+    for(uint8_t i = 0U; i < 4U; i++)
+    {
+        printf(
+            "%02X",
+            silion.rxBuffer[5U + i]
+        );
+    }
+
+    printf("\r\n");
+
+    printf("Reader Serial: ");
+
+    for(uint8_t i = 0U; i < 8U; i++)
+    {
+        printf(
+            "%02X",
+            silion.rxBuffer[9U + i]
+        );
+    }
+
+    printf("\r\n");
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET GEN2 TARGET
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetProtocolConfiguration(
+        &silion,
+        SILION_PROTOCOL_GEN2,
+        SILION_PROTOCOL_PARAM_TARGET
+    );
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Target TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Target response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Target failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    /*
+     * Response:
+     *
+     * [5] Protocol
+     * [6] Parameter
+     * [7] Option
+     * [8] Value
+     */
+
+    printf(
+        "Gen2 Target: %s\r\n",
+        (silion.rxBuffer[8] == 0U) ?
+        "A" : "B"
+    );
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET GEN2 MILLER
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetProtocolConfiguration(
+        &silion,
+        SILION_PROTOCOL_GEN2,
+        SILION_PROTOCOL_PARAM_MILLER
+    );
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Miller TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Miller response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Miller failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Gen2 Miller = M=%u\r\n",
+        silion.rxBuffer[7]
+    );
+
+    SILION_ClearFrame(&silion);
+
+    /*
+     * ============================================================
+     * GET GEN2 Q
+     * ============================================================
+     */
+
+    SILION_ClearFrame(&silion);
+    SILION_ClearUartFlags();
+    txComplete = 0;
+
+    SILION_GetProtocolConfiguration(
+        &silion,
+        SILION_PROTOCOL_GEN2,
+        SILION_PROTOCOL_PARAM_Q
+    );
+
+    result = SILION_WaitForTxComplete(100U);
+
+    if(result <= 0)
+    {
+        printf("ERROR: Get Q TX failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    result = SILION_WaitForResponse(1000U);
+
+    if(result != 1)
+    {
+        printf("ERROR: Get Q response failed.\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    if(SILION_GetStatus(&silion) != SILION_STATUS_SUCCESS)
+    {
+        printf(
+            "ERROR: Get Q failed, status = 0x%04X\r\n",
+            SILION_GetStatus(&silion)
+        );
+
+        while(1)
+        {
+        }
+    }
+
+    printf(
+        "Gen2 Q Option = 0x%02X, Value = 0x%02X\r\n",
+        silion.rxBuffer[7],
+        silion.rxBuffer[8]
+    );
+
+    SILION_ClearFrame(&silion);
 
     /*
      * ============================================================
@@ -2126,36 +3108,8 @@ int main(void)
             )
         )
         {
-            printf(
-                "TAG EPC: "
-            );
-
-            for(
-                uint16_t i = 0U;
-                i < asyncTag.epcLengthBytes;
-                i++
-            )
-            {
-                printf(
-                    "%02X",
-                    asyncTag.epc[i]
-                );
-            }
-
-            printf(
-                " | RSSI: %d dBm"
-                " | ANT: %u"
-                " | READS: %u"
-                " | FREQ: %lu kHz"
-                " | TIME: %lu ms\r\n",
-
-                asyncTag.rssi,
-                asyncTag.antenna,
-                asyncTag.readCount,
-
-                (unsigned long)asyncTag.frequencyKHz,
-
-                (unsigned long)asyncTag.timestampMs
+            VCP_SendTag(
+                &asyncTag
             );
         }
     }
