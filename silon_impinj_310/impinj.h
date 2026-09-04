@@ -69,6 +69,8 @@
 #define SILION_CMD_GET_TAG_BUFFER    0x29U
 
 #define SILION_CMD_ASYNC_INVENTORY   0xAAU
+#define SILION_ASYNC_START           0x48U
+#define SILION_ASYNC_STOP            0x49U
 
 
 #define SILION_PROGRAM_BOOTLOADER    0x11U
@@ -84,6 +86,12 @@
 #define SILION_ANTENNA_OPTION_POWER    0x03U
 
 #define SILION_CMD_SET_PROTOCOL_CONFIG    0x9BU
+#define SILION_CMD_SET_READER_CONFIG      0x9AU
+#define SILION_CMD_SET_FREQUENCY_HOPPING   0x95U
+
+#define SILION_CMD_SET_GPO                0x96U
+#define SILION_GPO_STATUS_LOW             0x00U
+#define SILION_GPO_STATUS_HIGH            0x01U
 
 #define SILION_PROTOCOL_GEN2             0x05U
 #define SILION_PROTOCOL_PARAM_SESSION    0x00U
@@ -113,6 +121,7 @@
 #define SILION_CMD_GET_TAG_PROTOCOL       0x63U
 #define SILION_CMD_GET_CURRENT_REGION     0x67U
 #define SILION_CMD_GET_TEMPERATURE        0x72U
+#define SILION_CMD_GET_GPI               0x66U
 
 #define SILION_CMD_GET_ANTENNA_PORTS    0x61U
 #define SILION_CMD_GET_PROTOCOL_CONFIG    0x6BU
@@ -120,9 +129,15 @@
 #define SILION_CMD_GET_FREQUENCY_HOPPING   0x65U
 #define SILION_CMD_GET_AVAILABLE_REGIONS   0x71U
 
+#define SILION_CMD_GET_READER_CONFIGURATION   0x6AU
+
 #define SILION_PROTOCOL_PARAM_TARGET    0x01U
 #define SILION_PROTOCOL_PARAM_MILLER    0x02U
 #define SILION_PROTOCOL_PARAM_Q        0x12U
+
+#define SILION_READER_CONFIG_KEY_ANTENNA_IDENTITY   0x00U
+#define SILION_READER_CONFIG_KEY_MAX_RSSI            0x06U
+#define SILION_READER_CONFIG_KEY_BANK_IDENTITY       0x08U
 
 
 
@@ -333,6 +348,8 @@ uint8_t SILION_GetCurrentRegion(
         Silion_Handle_t *pSilionHandle);
 uint8_t SILION_GetTemperature(
         Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetGPI(
+        Silion_Handle_t *pSilionHandle);
 uint8_t SILION_GetAntennaPorts(
         Silion_Handle_t *pSilionHandle,
         uint8_t option);
@@ -346,9 +363,15 @@ uint8_t SILION_GetAvailableRegions(
         Silion_Handle_t *pSilionHandle);
 uint8_t SILION_GetSerialNumber(
         Silion_Handle_t *pSilionHandle);
+uint8_t SILION_GetReaderConfiguration(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t key);
 uint8_t SILION_SetRegion(
         Silion_Handle_t *pSilionHandle,
         uint8_t region);
+
+//setting apis
+
 uint8_t SILION_SetInventoryAntenna(
         Silion_Handle_t *pSilionHandle,
         uint8_t txAntenna,
@@ -358,11 +381,39 @@ uint8_t SILION_SetAntennaPower(
         uint8_t antenna,
         uint16_t readPower,
         uint16_t writePower);
+
 uint8_t SILION_SetTagProtocol(
         Silion_Handle_t *pSilionHandle);
 uint8_t SILION_SetProtocolSession(
         Silion_Handle_t *pSilionHandle,
         uint8_t session);
+uint8_t SILION_SetProtocolMiller(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t miller);
+uint8_t SILION_SetProtocolTarget(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t option,
+        uint8_t target);
+uint8_t SILION_SetProtocolQ(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t option,
+        uint8_t q);
+uint8_t SILION_SetReaderConfiguration(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t key,
+        uint8_t value);
+uint8_t SILION_SetGPO(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t gpoNumber,
+        uint8_t status);
+uint8_t SILION_SetFrequencyHopping(
+        Silion_Handle_t *pSilionHandle,
+        const uint32_t *frequencies,
+        uint8_t count);
+
+uint8_t SILION_GetGPO(
+        Silion_Handle_t *pSilionHandle);
+
 uint8_t SILION_SingleTagInventory(
         Silion_Handle_t *pSilionHandle,
         uint16_t timeoutMs);
@@ -384,6 +435,10 @@ uint8_t SILION_AsyncTagQueuePop(
 uint8_t SILION_AsyncTagQueuePush(
         Silion_Handle_t *pSilionHandle,
         const SILION_Tag_t *tag);
+uint8_t SILION_StartAsyncInventory(
+        Silion_Handle_t *pSilionHandle);
+uint8_t SILION_StopAsyncInventory(
+        Silion_Handle_t *pSilionHandle);
 
 /*
  * ============================================================
