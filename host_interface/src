@@ -6,8 +6,10 @@
  */
 
 #include "host_interface.h"
-
+#include "sillion_application.h"
 #include <string.h>
+
+extern void VCP_SendString(const char *text);
 
 #define HOST_RX_BUFFER_SIZE 128U
 #define HOST_RX_QUEUE_SIZE  256U
@@ -54,9 +56,30 @@ void HOST_Interface_Task(void)
         {
             hostRxBuffer[hostRxIndex] = '\0';
 
-            /* Command parser comes next. */
+			if(strcmp(hostRxBuffer, "START\r") == 0)
+			{
+				if(SILION_Application_StartInventory() == 1U)
+				{
+					VCP_SendString("OK,START\r\n");
+				}
+				else
+				{
+					VCP_SendString("ERROR,START\r\n");
+				}
+			}
+			else if(strcmp(hostRxBuffer, "STOP\r") == 0)
+			{
+				SILION_Application_StopInventory();
+
+				VCP_SendString("OK,STOP\r\n");
+			}
+			else
+			{
+				VCP_SendString("ERROR,INVALID_COMMAND\r\n");
+			}
 
             hostRxIndex = 0U;
+			hostRxBuffer[0] = '\0';
         }
     }
 }
