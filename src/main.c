@@ -381,97 +381,24 @@ void USART1_IRQHandler(void)
  * ============================================================
  */
 
-void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEvent,uint8_t receivedByte)
+void USART_ApplicationEventCallback(
+        USART_Handle_t *pUSARTHandle,
+        uint8_t AppEvent,
+        uint8_t receivedByte)
 {
-
-    if (pUSARTHandle == &usart1)
-    {
-        if (AppEvent == USART_EVENT_TX_CMPLT)
-        {
-            /*
-             * Previous block has finished transmitting.
-             */
-            vcpTxTail =
-                (uint16_t)(
-                    (vcpTxTail + vcpTxActiveLen)
-                    % VCP_TX_BUFFER_SIZE
-                );
-
-            vcpTxActiveLen = 0U;
-
-            /*
-             * Anything remaining in the queue?
-             */
-            if (vcpTxTail != vcpTxHead)
-            {
-                uint16_t len;
-
-                /*
-                 * Keep this transmission contiguous.
-                 */
-                if (vcpTxHead > vcpTxTail)
-                {
-                    len = (uint16_t)(
-                        vcpTxHead - vcpTxTail
-                    );
-                }
-                else
-                {
-                    len = (uint16_t)(
-                        VCP_TX_BUFFER_SIZE - vcpTxTail
-                    );
-                }
-
-                vcpTxActiveLen = len;
-
-                USART_SendDataIT(
-                    &usart1,
-                    &vcpTxBuffer[vcpTxTail],
-                    len
-                );
-            }
-            else
-            {
-                /*
-                 * Nothing left to transmit.
-                 */
-                vcpTxBusy = 0U;
-            }
-        }
-
-        return;
-    }
-
-
     /*
-     * --------------------------------------------------------
-     * RX BYTE
-     * --------------------------------------------------------
+     * ========================================================
+     * USART1 = PC / ST-LINK VCP
+     * ========================================================
      */
-
-    if(AppEvent == USART_EVENT_RX_BYTE)
+    if(pUSARTHandle == &usart1)
     {
-        if(pUSARTHandle == &usart3)
-        {
-            if(rxCount < RX_QUEUE_SIZE)
-            {
-                rxQueue[rxHead] = receivedByte;
-
-                rxHead++;
-
-                if(rxHead >= RX_QUEUE_SIZE)
-                {
-                    rxHead = 0U;
-                }
-
-                rxCount++;
-            }
-            else
-            {
-                rxOverflow = 1U;
-            }
-        }
-        else if(pUSARTHandle == &usart1)
+        /*
+         * ----------------------------------------------------
+         * USART1 RX BYTE
+         * ----------------------------------------------------
+         */
+        if(AppEvent == USART_EVENT_RX_BYTE)
         {
             if(hostRxCount < HOST_RX_QUEUE_SIZE)
             {
@@ -491,64 +418,143 @@ void USART_ApplicationEventCallback(USART_Handle_t *pUSARTHandle,uint8_t AppEven
                 hostRxOverflow = 1U;
             }
         }
+
+        /*
+         * ----------------------------------------------------
+         * USART1 TX COMPLETE
+         *
+         * Continue VCP TX ring.
+         * ----------------------------------------------------
+         */
+        else if(AppEvent == USART_EVENT_TX_CMPLT)
+        {
+            vcpTxTail =
+                (uint16_t)(
+                    (vcpTxTail + vcpTxActiveLen)
+                    % VCP_TX_BUFFER_SIZE
+                );
+
+            vcpTxActiveLen = 0U;
+
+            if(vcpTxTail != vcpTxHead)
+            {
+                uint16_t len;
+
+                if(vcpTxHead > vcpTxTail)
+                {
+                    len =
+                        (uint16_t)(
+                            vcpTxHead - vcpTxTail
+                        );
+                }
+                else
+                {
+                    len =
+                        (uint16_t)(
+                            VCP_TX_BUFFER_SIZE - vcpTxTail
+                        );
+                }
+
+                vcpTxActiveLen = len;
+
+                USART_SendDataIT(
+                    &usart1,
+                    &vcpTxBuffer[vcpTxTail],
+                    len
+                );
+            }
+            else
+            {
+                vcpTxBusy = 0U;
+            }
+        }
+
+        /*
+         * USART1 events are completely handled above.
+         */
+        return;
     }
+
 
     /*
-     * --------------------------------------------------------
-     * TX COMPLETE
-     * --------------------------------------------------------
+     * ========================================================
+     * USART3 = SILION / E310
+     * ========================================================
      */
 
-    else if(AppEvent == USART_EVENT_TX_CMPLT)
+    if(pUSARTHandle == &usart3)
     {
-        txComplete = 1;
+        /*
+         * ----------------------------------------------------
+         * USART3 RX BYTE
+         * ----------------------------------------------------
+         */
+        if(AppEvent == USART_EVENT_RX_BYTE)
+        {
+            if(rxCount < RX_QUEUE_SIZE)
+            {
+                rxQueue[rxHead] = receivedByte;
+
+                rxHead++;
+
+                if(rxHead >= RX_QUEUE_SIZE)
+                {
+                    rxHead = 0U;
+                }
+
+                rxCount++;
+            }
+            else
+            {
+                rxOverflow = 1U;
+            }
+        }
+
+        /*
+         * ----------------------------------------------------
+         * USART3 TX COMPLETE
+         * ----------------------------------------------------
+         */
+        else if(AppEvent == USART_EVENT_TX_CMPLT)
+        {
+            txComplete = 1U;
+        }
+
+        /*
+         * ----------------------------------------------------
+         * USART3 RX COMPLETE
+         * ----------------------------------------------------
+         */
+        else if(AppEvent == USART_EVENT_RX_CMPLT)
+        {
+            rxComplete = 1U;
+        }
+
+        /*
+         * ----------------------------------------------------
+         * USART3 UART ERRORS
+         * ----------------------------------------------------
+         */
+        else if(AppEvent == USART_EVENT_ORE)
+        {
+            rxORE = 1U;
+        }
+
+        else if(AppEvent == USART_EVENT_FE)
+        {
+            rxFE = 1U;
+        }
+
+        else if(AppEvent == USART_EVENT_NE)
+        {
+            rxNE = 1U;
+        }
+
+        else if(AppEvent == USART_EVENT_PE)
+        {
+            rxPE = 1U;
+        }
     }
-
-
-    /*
-     * --------------------------------------------------------
-     * RX COMPLETE
-     * --------------------------------------------------------
-     */
-
-    else if(AppEvent == USART_EVENT_RX_CMPLT)
-    {
-        rxComplete = 1;
-    }
-
-
-    /*
-     * --------------------------------------------------------
-     * UART ERRORS
-     * --------------------------------------------------------
-     */
-
-    else if(AppEvent == USART_EVENT_ORE)
-    {
-        rxORE = 1;
-    }
-
-    else if(AppEvent == USART_EVENT_FE)
-    {
-        rxFE = 1;
-    }
-
-    else if(AppEvent == USART_EVENT_NE)
-    {
-        rxNE = 1;
-    }
-
-    else if(AppEvent == USART_EVENT_PE)
-    {
-        rxPE = 1;
-    }
-
-
-
-
-    /*
-     * Existing USART3 handling continues below.
-     */
 }
 
 
@@ -720,7 +726,7 @@ static void SILION_DelayMs(uint32_t delayMs)
  * ============================================================
  */
 
-static int SILION_WaitForResponse(uint32_t timeoutMs)
+int SILION_WaitForResponse(uint32_t timeoutMs)
 {
     uint32_t start;
 
@@ -787,36 +793,6 @@ static int SILION_WaitForResponse(uint32_t timeoutMs)
  * PRINT FRAME
  * ============================================================
  */
-
-static void PrintSilionFrame(void)
-{
-    uint16_t i;
-
-
-    printf("\r\n");
-    printf("========================================\r\n");
-    printf("SILION RESPONSE\r\n");
-    printf("========================================\r\n");
-
-
-    printf("Length : %u\r\n",silion.rxIndex );
-
-
-    printf("Command: 0x%02X\r\n", SILION_GetCommand(&silion));
-
-    printf("Status : 0x%04X\r\n", SILION_GetStatus(&silion));
-
-    printf("Frame:\r\n");
-
-
-    for(i = 0;i < silion.rxIndex;i++)
-    {
-        printf("%02X ",silion.rxBuffer[i]);
-    }
-
-
-    printf("\r\n");
-}
 
 void VCP_SendString(const char *text)
 {
@@ -926,22 +902,14 @@ void VCP_SendString(const char *text)
 
 int main(void)
 {
-    int result;
-
-    //uint16_t i;
-
-
     /*
      * --------------------------------------------------------
      * DEBUG CONSOLE succesful now move ahead
      * okay both of them are working now lets go ahead
      * --------------------------------------------------------
      */
-
     initialise_monitor_handles();
-
     SILION_SysTick_Init();
-
 
     printf("\r\n");
     printf("========================================\r\n");
@@ -949,11 +917,10 @@ int main(void)
     printf(" STARTUP SEQUENCE TEST\r\n");
     printf("========================================\r\n");
 
-
-    /*
+ /*
      *
      * --------------------------------------------------------
-     * 1. ENABLE SILION
+     * 1. ENABLE SILION change the layout
      * --------------------------------------------------------
      */
 
@@ -1037,859 +1004,33 @@ int main(void)
      */
 
     USART_ReceiveByteIT(&usart3);
+    USART_ReceiveByteIT(&usart1);
 
 
-    /*
-     * ========================================================
-     * COMMAND 1
-     *
-     * 0x03 GET VERSION
-     * ========================================================
-     */
-
-    printf("Get Version...\r\n");
-
-
-    txComplete = 0;
-
-
-    if(SILION_GetVersion( &silion) == 0)
-    {
-        printf( "ERROR: Get Version TX failed.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF HERE.
-     *
-     * Wait for TX while continuing to process RX.
-     */
-    result =SILION_WaitForTxComplete(100U);
-
-
-    if(result <= 0)
-    {
-        printf("ERROR: Get Version TX timeout/error.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF DURING RESPONSE.
-     */
-    result = SILION_WaitForResponse(1000U);
-
-
-    if(result != 1)
-    {
-        printf("ERROR: Get Version response failed.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * Now transaction is finished.
-     * Safe to print.
-     */
-    PrintSilionFrame();
-
-
-    if( SILION_GetCommand(&silion) != SILION_CMD_GET_VERSION )
-    {
-        printf("ERROR: Invalid Get Version response command.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-    {
-        printf("ERROR: Get Version status = 0x%04X\r\n",SILION_GetStatus(&silion));
-
-        while(1)
-        {
-        }
-    }
-
-
-    printf("Get Version: SUCCESS\r\n" );
-
-
-    /*
-     * We have finished transaction 0x03.
-     */
-    SILION_ClearFrame(&silion);
-
-
-    SILION_ClearUartFlags();
-
-
-    /*
-     * ========================================================
-     * COMMAND 2
-     *
-     * 0x04 BOOT FIRMWARE
-     * ========================================================
-     *
-     * Expected:
-     *
-     * FF 00 04 1D 0B
-     *
-     * Do not print between TX and RX.
-     * ========================================================
-     */
-
-    printf("\r\nBoot Firmware...\r\n" );
-
-
-    txComplete = 0;
-
-
-    if(SILION_BootFirmware(&silion ) == 0)
-    {
-        printf("ERROR: Boot Firmware TX failed.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF.
-     */
-    result =SILION_WaitForTxComplete(100U);
-
-
-    if(result <= 0)
-    {
-        printf( "ERROR: Boot Firmware TX timeout/error.\r\n" );
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF.
-     */
-    result = SILION_WaitForResponse(1000U);
-
-
-    if(result != 1)
-    {
-        printf("ERROR: Boot Firmware response failed.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * Safe to print now.
-     */
-    PrintSilionFrame();
-
-
-    if(SILION_GetCommand(&silion)!=SILION_CMD_BOOT_FIRMWARE)
-    {
-        printf("ERROR: Invalid Boot Firmware response command.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-    {
-        printf("ERROR: Boot Firmware status = 0x%04X\r\n",SILION_GetStatus(&silion));
-
-        while(1)
-        {
-        }
-    }
-
-
-    printf("Boot Firmware: SUCCESS\r\n");
-
-
-    /*
-     * --------------------------------------------------------
-     * IMPORTANT:
-     *
-     * Protocol requires approximately 500 ms after 0x04.
-     * --------------------------------------------------------
-     */
-
-    SILION_ClearFrame(&silion);
-
-
-    SILION_ClearUartFlags();
-
-
-    SILION_DelayMs(500U);
-
-
-    /*
-     * ========================================================
-     * COMMAND 3
-     *
-     * 0x0C GET RUN PHASE
-     * ========================================================
-     *
-     * Expected:
-     *
-     * FF 00 0C 1D 03
-     *
-     * Successful application response:
-     *
-     * FF 01 0C 00 00 12 CRC_H CRC_L
-     *
-     * 0x12 = Application firmware
-     *
-     * ========================================================
-     */
-
-    printf( "\r\nGet Run Phase...\r\n");
-
-
-    txComplete = 0;
-
-
-    if( SILION_GetRunPhase( &silion) == 0 )
-    {
-        printf("ERROR: Get Run Phase TX failed.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF.
-     */
-    result =SILION_WaitForTxComplete(100U);
-
-
-    if(result <= 0)
-    {
-        printf("ERROR: Get Run Phase TX timeout/error.\r\n" );
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * NO PRINTF.
-     */
-    result =SILION_WaitForResponse(1000U);
-
-
-    if(result != 1)
-    {
-        printf("ERROR: Get Run Phase response failed.\r\n" );
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * Safe to print now.
-     */
-    PrintSilionFrame();
-
-
-    if(SILION_GetCommand(&silion)!=SILION_CMD_GET_RUN_PHASE)
-    {
-        printf("ERROR: Invalid Get Run Phase response command.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-    {
-        printf("ERROR: Get Run Phase status = 0x%04X\r\n",SILION_GetStatus(&silion));
-
-        while(1)
-        {
-        }
-    }
-
-
-    /*
-     * For 0x0C the first data byte is at rxBuffer[5].
-     */
-    if(
-        silion.rxIndex < 8
-    )
-    {
-        printf("ERROR: Get Run Phase response too short.\r\n");
-
-        while(1)
-        {
-        }
-    }
-
-
-    printf("Run Phase: 0x%02X\r\n",silion.rxBuffer[5]);
-
-
-    if(silion.rxBuffer[5]==SILION_PROGRAM_APPLICATION)
-    {
-        printf("Application firmware is running.\r\n");
-    }
-    else if(silion.rxBuffer[5]==SILION_PROGRAM_BOOTLOADER )
-    {
-        printf("ERROR: Module is still in bootloader.\r\n");
-
-        while(1)
-        {
-        }
-    }
-    else
-    {
-        printf("ERROR: Unknown run phase = 0x%02X\r\n",silion.rxBuffer[5]);
-
-        while(1)
-        {
-        }
-    }
-
-    /*
-         * ============================================================
-         * COMMAND 4
-         *
-         * 0x97 SET CURRENT REGION
-         *
-         * Bench-test region:
-         *     0xFF = Full Band
-         * ============================================================
-         */
-
-        SILION_ClearFrame(&silion);
-
-        SILION_ClearUartFlags();
-
-        txComplete = 0;
-
-        SILION_SetRegion(&silion, readerConfig.region);
-
-
-        /*
-         * NO printf() HERE.
-         *
-         * Wait for TX completion.
-         */
-        result =SILION_WaitForTxComplete(100U);
-
-
-        if(result <= 0)
-        {
-            printf("ERROR: Set Region TX timeout/error.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * NO printf() HERE.
-         *
-         * Wait for complete response.
-         */
-        result =SILION_WaitForResponse(1000U);
-
-
-        if(result != 1)
-        {
-            printf("ERROR: Set Region response failed.\r\n" );
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * Transaction is complete, so printf is safe again.
-         */
-        PrintSilionFrame();
-
-
-        if(SILION_GetCommand(&silion)!=SILION_CMD_SET_REGION)
-        {
-            printf( "ERROR: Invalid Set Region response command.\r\n" );
-
-            while(1)
-            {
-            }
-        }
-
-
-        if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-        {
-            printf("ERROR: Set Region failed, status = 0x%04X\r\n", SILION_GetStatus(&silion));
-
-            while(1)
-            {
-            }
-        }
-
-
-        printf("Set Region (Full Band): SUCCESS\r\n");
-
-        /*
-         * ============================================================
-         * 0x91 SET INVENTORY ANTENNA
-         *
-         * Antenna 1:
-         *     TX = 1
-         *     RX = 1
-         *
-         * No printf between TX and RX.
-         * ============================================================
-         */
-
-        SILION_ClearFrame(&silion);
-        SILION_ClearUartFlags();
-
-        txComplete = 0;
-
-        SILION_SetInventoryAntenna(
-            &silion,
-            readerConfig.txAntenna,
-            readerConfig.rxAntenna
-        );
-
-
-        /*
-         * NO PRINTF HERE.
-         */
-        result =SILION_WaitForTxComplete(100U);
-
-        if(result <= 0)
-        {
-            printf( "ERROR: Set Inventory Antenna TX failed.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * NO PRINTF HERE.
-         */
-        result =SILION_WaitForResponse(1000U);
-
-        if(result != 1)
-        {
-            printf("ERROR: Set Inventory Antenna response failed.\r\n" );
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * Transaction finished.
-         */
-        if(SILION_GetCommand(&silion)!=SILION_CMD_SET_ANTENNA_PORTS)
-        {
-            printf("ERROR: Invalid Set Antenna response command.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        if(
-            SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS
-        )
-        {
-            printf("ERROR: Set Inventory Antenna failed, status = 0x%04X\r\n",SILION_GetStatus(&silion));
-
-            while(1)
-            {
-            }
-        }
-
-
-        printf("Set Inventory Antenna 1: SUCCESS\r\n");
-
-
-        SILION_ClearFrame(&silion);
-
-        /*
-         * ============================================================
-         * 0x91 SET ANTENNA POWER
-         *
-         * Antenna 1
-         *
-         * Read  power  = 30.00 dBm
-         * Write power  = 30.00 dBm
-         *
-         * 3000 = 0x0BB8
-         *
-         * NO printf() DURING TRANSACTION
-         * ============================================================
-         */
-
-        SILION_ClearFrame(&silion);
-
-        SILION_ClearUartFlags();
-
-        txComplete = 0;
-
-
-        SILION_SetAntennaPower(
-            &silion,
-            readerConfig.txAntenna,
-            readerConfig.readPower,
-            readerConfig.writePower
-        );
-
-
-        /*
-         * NO PRINTF HERE
-         */
-        result = SILION_WaitForTxComplete(100U);
-
-
-        if(result <= 0)
-        {
-            printf("ERROR: Set Antenna Power TX failed.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * NO PRINTF HERE
-         */
-        result =SILION_WaitForResponse(1000U);
-
-
-        if(result != 1)
-        {
-            printf("ERROR: Set Antenna Power response failed.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * Transaction finished.
-         */
-
-        if(SILION_GetCommand(&silion)!=SILION_CMD_SET_ANTENNA_PORTS)
-        {
-            printf("ERROR: Invalid Set Antenna Power response.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-        {
-            printf("ERROR: Set Antenna Power failed, status = 0x%04X\r\n",SILION_GetStatus(&silion));
-
-            while(1)
-            {
-            }
-        }
-
-
-        printf("Antenna 1 Power = 30 dBm: SUCCESS\r\n");
-
-
-        SILION_ClearFrame(&silion);
-
-        /*
-         * ============================================================
-         * 0x93 SET TAG PROTOCOL
-         *
-         * GEN2 / 18K-6C
-         *
-         * NO printf() DURING TRANSACTION
-         * ============================================================
-         */
-
-        SILION_ClearFrame(
-            &silion
-        );
-
-        SILION_ClearUartFlags();
-
-        txComplete = 0;
-
-
-        SILION_SetTagProtocol(
-            &silion
-        );
-
-
-        /*
-         * NO PRINTF HERE
-         */
-
-        result =
-            SILION_WaitForTxComplete(
-                100U
-            );
-
-        if(result <= 0)
-        {
-            printf(
-                "ERROR: Set Tag Protocol TX failed.\r\n"
-            );
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * NO PRINTF HERE
-         */
-
-        result =
-            SILION_WaitForResponse(
-                1000U
-            );
-
-        if(result != 1)
-        {
-            printf(
-                "ERROR: Set Tag Protocol response failed.\r\n"
-            );
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * Transaction complete.
-         */
-
-        if(
-            SILION_GetCommand(&silion)
-            !=
-            SILION_CMD_SET_TAG_PROTOCOL
-        )
-        {
-            printf(
-                "ERROR: Invalid Set Tag Protocol response.\r\n"
-            );
-
-            while(1)
-            {
-            }
-        }
-
-
-        if(
-            SILION_GetStatus(&silion)
-            !=
-            SILION_STATUS_SUCCESS
-        )
-        {
-            printf(
-                "ERROR: Set Tag Protocol failed, status = 0x%04X\r\n",
-                SILION_GetStatus(&silion)
-            );
-
-            while(1)
-            {
-            }
-        }
-
-
-        printf(
-            "Set Tag Protocol GEN2: SUCCESS\r\n"
-        );
-
-
-        SILION_ClearFrame(
-            &silion
-        );
-
-        /*
-         * ============================================================
-         * 0x9B SET PROTOCOL CONFIGURATION
-         *
-         * GEN2
-         * Session = 1
-         *
-         * NO printf() DURING TRANSACTION
-         * ============================================================
-         */
-
-        SILION_ClearFrame(&silion);
-
-        SILION_ClearUartFlags();
-
-        txComplete = 0;
-
-
-        SILION_SetProtocolSession(
-            &silion,
-            readerConfig.session
-        );
-
-
-        /*
-         * NO PRINTF HERE
-         */
-        result = SILION_WaitForTxComplete(100U);
-
-
-        if(result <= 0)
-        {
-            printf("ERROR: Set Protocol Session TX failed.\r\n" );
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * NO PRINTF HERE
-         */
-        result =SILION_WaitForResponse(1000U);
-
-
-        if(result != 1)
-        {
-            printf("ERROR: Set Protocol Session response failed.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        /*
-         * Transaction finished.
-         */
-
-        if(
-            SILION_GetCommand(&silion)!=SILION_CMD_SET_PROTOCOL_CONFIG)
-        {
-            printf("ERROR: Invalid Set Protocol Configuration response.\r\n");
-
-            while(1)
-            {
-            }
-        }
-
-
-        if(SILION_GetStatus(&silion)!=SILION_STATUS_SUCCESS)
-        {
-            printf("ERROR: Set Protocol Session failed, status = 0x%04X\r\n",SILION_GetStatus(&silion) );
-
-            while(1)
-            {
-            }
-        }
-
-
-        printf("Set Protocol Session 0: SUCCESS\r\n");
-
-
-        SILION_ClearFrame(&silion);
-
-
-
-  // while(1)
-
-
-    /*
-     * ============================================================
-     * STAGE 1
-     *
-     * START ASYNCHRONOUS INVENTORY
-     *
-     * No printf() after this command while RFID frames
-     * are continuously arriving.
-     * ============================================================
-     */
-
-
-    /*
-     * Start 0xAA48.
-     */
     SILION_Application_Init(&silion);
+
+    if(SILION_Application_ConfigureReader() == 0U)
+    {
+        VCP_SendString("ERROR,READER_CONFIG\r\n");
+
+        while(1)
+        {
+        }
+    }
+
+    /*
+     * --------------------------------------------------------
+     * HOST INTERFACE
+     * --------------------------------------------------------
+     */
+
     HOST_Interface_Init();
 
-    if(SILION_Application_StartInventory() == 0U)
-    {
-        printf("ERROR: Async Inventory START failed.\r\n");
-        while(1) {}
-    }
-
-
     /*
-     * Wait ONLY for the initial command TX.
-     *
-     * The module does not return a normal inventory-complete
-     * response here. Async inventory starts streaming afterward.
+     * --------------------------------------------------------
+     * MAIN APPLICATION LOOP
+     * --------------------------------------------------------
      */
-
-
-    printf(
-        "\r\nAsync Inventory START sent.\r\n"
-    );
-
-    printf(
-        "Receiving asynchronous RFID frames...\r\n"
-    );
-
-
-    /*
-     * IMPORTANT:
-     *
-     * Do NOT call SILION_WaitForResponse() here.
-     *
-     * Async inventory has unsolicited frames.
-     */
-    //SILION_Tag_t asyncTag;
 
     while(1)
     {
