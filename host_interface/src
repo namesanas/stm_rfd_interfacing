@@ -1,13 +1,9 @@
-/*
- * host_interface.c
- *
- *  Created on: 04-Sept-2026
- *      Author: Identium
- */
-
 #include "host_interface.h"
 #include "sillion_application.h"
+
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 extern void VCP_SendString(const char *text);
 
@@ -23,11 +19,61 @@ extern volatile uint32_t hostRxOverflow;
 static char hostRxBuffer[HOST_RX_BUFFER_SIZE];
 static uint16_t hostRxIndex = 0U;
 
+
 void HOST_Interface_Init(void)
 {
     hostRxIndex = 0U;
-    memset(hostRxBuffer, 0, sizeof(hostRxBuffer));
+    memset(
+        hostRxBuffer,
+        0,
+        sizeof(hostRxBuffer)
+    );
 }
+
+
+static uint8_t HOST_ParseHexByte(
+    const char *text,
+    uint8_t *value
+)
+{
+    unsigned int temp;
+
+    if(text == NULL || value == NULL)
+        return 0U;
+
+    if(sscanf(text, "%x", &temp) != 1)
+        return 0U;
+
+    if(temp > 0xFFU)
+        return 0U;
+
+    *value = (uint8_t)temp;
+
+    return 1U;
+}
+
+
+static uint8_t HOST_ParseUint16(
+    const char *text,
+    uint16_t *value
+)
+{
+    unsigned int temp;
+
+    if(text == NULL || value == NULL)
+        return 0U;
+
+    if(sscanf(text, "%u", &temp) != 1)
+        return 0U;
+
+    if(temp > 65535U)
+        return 0U;
+
+    *value = (uint16_t)temp;
+
+    return 1U;
+}
+
 
 void HOST_Interface_Task(void)
 {
@@ -35,6 +81,11 @@ void HOST_Interface_Task(void)
     {
         uint8_t byte;
 
+        /*
+         * ----------------------------------------------------
+         * Get one byte from host RX queue.
+         * ----------------------------------------------------
+         */
         byte = hostRxQueue[hostRxTail];
 
         hostRxTail++;
@@ -46,40 +97,623 @@ void HOST_Interface_Task(void)
 
         hostRxCount--;
 
-        if(hostRxIndex < (HOST_RX_BUFFER_SIZE - 1U))
+
+        /*
+         * ----------------------------------------------------
+         * LF handling.
+         *
+         * LF is ignored completely.
+         *
+         * Therefore:
+         *
+         *     COMMAND\r
+         *     COMMAND\r\n
+         *
+         * both result in exactly one command.
+         * ----------------------------------------------------
+         */
+        if(byte == '\n')
+        {
+            continue;
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * CR = command terminator.
+         * ----------------------------------------------------
+         */
+        if(byte == '\r')
+        {
+            /*
+             * Ignore empty commands.
+             *
+             * This prevents extra CR characters from
+             * generating ERROR,INVALID_COMMAND.
+             */
+            if(hostRxIndex == 0U)
+            {
+                continue;
+            }
+
+            /*
+             * Null terminate command.
+             */
+            hostRxBuffer[hostRxIndex] = '\0';
+
+
+            /*
+             * =================================================
+             * START
+             * =================================================
+             */
+            if(strcmp(hostRxBuffer, "START") == 0)
+            {
+                if(SILION_Application_StartInventory() == 1U)
+                {
+                    VCP_SendString(
+                        "OK,START\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,START\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * STOP
+             * =================================================
+             */
+            else if(strcmp(hostRxBuffer, "STOP") == 0)
+            {
+                SILION_Application_StopInventory();
+
+                VCP_SendString(
+                    "OK,STOP\r\n"
+                );
+            }
+
+
+            /*
+             * =================================================
+             * GET STATUS
+             * =================================================
+             */
+            else if(strcmp(hostRxBuffer, "GET_STATUS") == 0)
+            {
+                if(
+                    SILION_Application_GetState()
+                    ==
+                    SILION_APP_INVENTORY
+                )
+                {
+                    VCP_SendString(
+                        "STATUS,INVENTORY\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "STATUS,IDLE\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET VERSION
+             * =================================================
+             */
+            else if(strcmp(hostRxBuffer, "GET_VERSION") == 0)
+            {
+                if(
+                    SILION_Application_GetVersion()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_VERSION\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET SERIAL
+             * =================================================
+             */
+            else if(strcmp(hostRxBuffer, "GET_SERIAL") == 0)
+            {
+                if(
+                    SILION_Application_GetSerial()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_SERIAL\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET TEMPERATURE
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_TEMPERATURE"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetTemperature()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_TEMPERATURE\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET REGION
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_REGION"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetRegion()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_REGION\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET ANTENNA
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_ANTENNA"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetAntenna()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_ANTENNA\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET POWER
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_POWER"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetPower()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_POWER\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET PROTOCOL
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_PROTOCOL"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetProtocol()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_PROTOCOL\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET SESSION
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_SESSION"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetSession()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_SESSION\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET FREQUENCY
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_FREQUENCY"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetFrequency()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_FREQUENCY\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * GET REGIONS
+             * =================================================
+             */
+            else if(
+                strcmp(
+                    hostRxBuffer,
+                    "GET_REGIONS"
+                ) == 0
+            )
+            {
+                if(
+                    SILION_Application_GetRegions()
+                    ==
+                    0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,GET_REGIONS\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * SET POWER
+             *
+             * Example:
+             *
+             *     SET_POWER,3000
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SET_POWER,",
+                    10U
+                ) == 0
+            )
+            {
+                uint16_t power;
+
+                if(
+                    HOST_ParseUint16(
+                        &hostRxBuffer[10U],
+                        &power
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,SET_POWER\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_SetPower(
+                        power,
+                        power
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,SET_POWER\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SET_POWER\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * SET ANTENNA
+             *
+             * Example:
+             *
+             *     SET_ANTENNA,1,1
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SET_ANTENNA,",
+                    12U
+                ) == 0
+            )
+            {
+                unsigned int tx;
+                unsigned int rx;
+
+                if(
+                    sscanf(
+                        &hostRxBuffer[12U],
+                        "%u,%u",
+                        &tx,
+                        &rx
+                    ) == 2
+                    &&
+                    tx <= 255U
+                    &&
+                    rx <= 255U
+                )
+                {
+                    if(
+                        SILION_Application_SetAntenna(
+                            (uint8_t)tx,
+                            (uint8_t)rx
+                        ) == 1U
+                    )
+                    {
+                        VCP_SendString(
+                            "OK,SET_ANTENNA\r\n"
+                        );
+                    }
+                    else
+                    {
+                        VCP_SendString(
+                            "ERROR,SET_ANTENNA\r\n"
+                        );
+                    }
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SET_ANTENNA\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * SET REGION
+             *
+             * Example:
+             *
+             *     SET_REGION,FF
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SET_REGION,",
+                    11U
+                ) == 0
+            )
+            {
+                uint8_t region;
+
+                if(
+                    HOST_ParseHexByte(
+                        &hostRxBuffer[11U],
+                        &region
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,SET_REGION\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_SetRegion(
+                        region
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,SET_REGION\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SET_REGION\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * SET SESSION
+             *
+             * Example:
+             *
+             *     SET_SESSION,0
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SET_SESSION,",
+                    12U
+                ) == 0
+            )
+            {
+                unsigned int session;
+
+                if(
+                    sscanf(
+                        &hostRxBuffer[12U],
+                        "%u",
+                        &session
+                    ) == 1
+                    &&
+                    session <= 3U
+                )
+                {
+                    if(
+                        SILION_Application_SetSession(
+                            (uint8_t)session
+                        ) == 1U
+                    )
+                    {
+                        VCP_SendString(
+                            "OK,SET_SESSION\r\n"
+                        );
+                    }
+                    else
+                    {
+                        VCP_SendString(
+                            "ERROR,SET_SESSION\r\n"
+                        );
+                    }
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SET_SESSION\r\n"
+                    );
+                }
+            }
+
+
+            /*
+             * =================================================
+             * UNKNOWN COMMAND
+             * =================================================
+             */
+            else
+            {
+                VCP_SendString(
+                    "ERROR,INVALID_COMMAND\r\n"
+                );
+            }
+
+
+            /*
+             * ------------------------------------------------
+             * Reset command buffer.
+             * ------------------------------------------------
+             */
+            hostRxIndex = 0U;
+            hostRxBuffer[0] = '\0';
+
+            continue;
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * Ignore other non-printable/control characters.
+         * ----------------------------------------------------
+         */
+        if(
+            byte < 0x20U ||
+            byte > 0x7EU
+        )
+        {
+            continue;
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * Store normal printable character.
+         * ----------------------------------------------------
+         */
+        if(
+            hostRxIndex <
+            (HOST_RX_BUFFER_SIZE - 1U)
+        )
         {
             hostRxBuffer[hostRxIndex] = (char)byte;
             hostRxIndex++;
-        }
-
-        if(byte == '\n')
-        {
-            hostRxBuffer[hostRxIndex] = '\0';
-
-			if(strcmp(hostRxBuffer, "START\r") == 0)
-			{
-				if(SILION_Application_StartInventory() == 1U)
-				{
-					VCP_SendString("OK,START\r\n");
-				}
-				else
-				{
-					VCP_SendString("ERROR,START\r\n");
-				}
-			}
-			else if(strcmp(hostRxBuffer, "STOP\r") == 0)
-			{
-				SILION_Application_StopInventory();
-
-				VCP_SendString("OK,STOP\r\n");
-			}
-			else
-			{
-				VCP_SendString("ERROR,INVALID_COMMAND\r\n");
-			}
-
-            hostRxIndex = 0U;
-			hostRxBuffer[0] = '\0';
         }
     }
 }
