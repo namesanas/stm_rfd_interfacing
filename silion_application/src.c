@@ -1084,6 +1084,510 @@ void SILION_Application_Task(void)
     }
 }
 
+/*
+ * ------------------------------------------------------------
+ * WRITE TAG DATA
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_WriteTagData(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint8_t memBank,
+    uint32_t address,
+    const uint8_t *writeData,
+    uint8_t writeDataLength
+)
+{
+    if(pSilion == NULL)
+        return 0U;
+
+    if(appState != SILION_APP_IDLE)
+        return 0U;
+
+    if(epc == NULL || writeData == NULL)
+        return 0U;
+
+    if(epcLengthBytes == 0U || epcLengthBytes > 62U)
+        return 0U;
+
+    if(
+        writeDataLength == 0U ||
+        writeDataLength > 64U ||
+        (writeDataLength % 2U) != 0U
+    )
+    {
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_WriteTagDataByEPC(
+            pSilion,
+            5000U,
+            memBank,
+            address,
+            writeData,
+            writeDataLength,
+            epc,
+            epcLengthBytes
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    {
+        uint8_t attempt;
+
+        for(attempt = 0U; attempt < 3U; attempt++)
+        {
+            if(SILION_Application_Transaction(
+                    SILION_CMD_WRITE_TAG_DATA) == 1U)
+            {
+                SILION_ClearFrame(pSilion);
+                return 1U;
+            }
+
+            SILION_ClearFrame(pSilion);
+
+            if(attempt < 2U)
+            {
+                SILION_Application_DelayMs(100U);
+
+                SILION_ClearUartFlags();
+                txComplete = 0U;
+
+                if(SILION_WriteTagDataByEPC(
+                        pSilion,
+                        5000U,
+                        memBank,
+                        address,
+                        writeData,
+                        writeDataLength,
+                        epc,
+                        epcLengthBytes) == 0U)
+                {
+                    return 0U;
+                }
+            }
+        }
+
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+
+    return 1U;
+}
+/*
+ * ------------------------------------------------------------
+ * READ TAG DATA
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_ReadTagData(
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes)
+{
+    uint8_t data[192];
+    uint16_t dataLength;
+    char debug[64];
+
+    if(pSilion == NULL)
+    {
+        return 0U;
+    }
+
+    if(appState != SILION_APP_IDLE)
+    {
+        return 0U;
+    }
+
+    if(
+        wordCount == 0U ||
+        wordCount > 96U
+    )
+    {
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_ReadTagDataByEPC(
+            pSilion,
+            1000,
+            memBank,
+            address,
+            wordCount,
+            epc,
+            epcLengthBytes
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_READ_TAG_DATA
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_ParseReadTagData(
+            pSilion,
+            data,
+            sizeof(data),
+            &dataLength
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * Response format:
+     *
+     * READ_DATA,BANK=<n>,ADDR=<n>,WORDS=<n>,DATA=<hex>
+     */
+    sprintf(
+        debug,
+        "READ_DATA,BANK=%u,ADDR=%lu,WORDS=%u,DATA=",
+        memBank,
+        (unsigned long)address,
+        wordCount
+    );
+
+    VCP_SendString(debug);
+
+    for(uint16_t i = 0U; i < dataLength; i++)
+    {
+        char hex[3];
+
+        sprintf(
+            hex,
+            "%02X",
+            data[i]
+        );
+
+        VCP_SendString(hex);
+    }
+
+    VCP_SendString("\r\n");
+
+    return 1U;
+}
+
+/*
+ * ------------------------------------------------------------
+ * SINGLE INVENTORY
+ *
+ * Native 0x21 command.
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_SingleInventory(
+        uint16_t timeoutMs)
+{
+    SILION_Tag_t tag;
+
+    if(pSilion == NULL)
+    {
+        return 0U;
+    }
+
+    /*
+     * Do not allow a single poll while
+     * asynchronous inventory is active.
+     */
+    if(appState != SILION_APP_IDLE)
+    {
+        return 0U;
+    }
+
+    /*
+     * Start with a clean RX transaction.
+     */
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    /*
+     * Send native 0x21.
+     */
+    if(
+        SILION_SingleTagInventory(
+            pSilion,
+            timeoutMs
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * Wait for TX completion and the module reply.
+     */
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_SINGLE_TAG_INVENTORY
+        ) == 0U
+    )
+    {
+        /*
+         * No tag is also a legitimate reader response.
+         */
+        if(
+            SILION_GetStatus(pSilion)
+            ==
+            SILION_STATUS_FAULT_NO_TAGS_FOUND
+        )
+        {
+            VCP_SendString(
+                "NO_TAG\r\n"
+            );
+
+            return 1U;
+        }
+
+        return 0U;
+    }
+
+    /*
+     * Parse returned tag.
+     */
+    if(
+        SILION_ParseSingleTagInventory(
+            pSilion,
+            &tag
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * Use the same TAG format already used
+     * by asynchronous inventory.
+     */
+    VCP_SendTag(&tag);
+
+    return 1U;
+}
+
+/*
+ * ------------------------------------------------------------
+ * SYNCHRONOUS INVENTORY
+ *
+ * Native sequence:
+ *
+ *     0x22 Synchronous Inventory
+ *     0x29 Get Tag Buffer
+ *
+ * The 0x22 response tells us how many tags
+ * were placed into the reader's internal buffer.
+ *
+ * 0x29 is then called repeatedly until it returns
+ * a tag count of zero.
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_SynchronousInventory(
+        uint16_t timeoutMs)
+{
+    uint8_t totalTags;
+    uint8_t batchCount;
+    uint8_t i;
+
+    /*
+     * Keep the batch reasonably small so we do not
+     * put a very large object on the STM32 stack.
+     */
+    static SILION_Tag_t tags[32];
+
+    if(pSilion == NULL)
+    {
+        return 0U;
+    }
+
+    /*
+     * Synchronous inventory is an IDLE operation.
+     * Do not start it while async inventory is active.
+     */
+    if(appState != SILION_APP_IDLE)
+    {
+        return 0U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * 1. Start synchronous inventory - 0x22
+     * --------------------------------------------------------
+     */
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_SynchronousInventory(
+            pSilion,
+            timeoutMs
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_SYNC_INVENTORY
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * Our 0x22 command uses:
+     *
+     * Option       = 0x00
+     * Search Flags = 0x0000
+     *
+     * Therefore the response uses the 1-byte
+     * tag count format.
+     *
+     * Response data:
+     *
+     * rxBuffer[5] = Option
+     * rxBuffer[6] = Search Flags MSB
+     * rxBuffer[7] = Search Flags LSB
+     * rxBuffer[8] = Tags Found
+     */
+    if(pSilion->expectedLength < 4U)
+    {
+        return 0U;
+    }
+
+    totalTags =
+        pSilion->rxBuffer[8];
+
+    /*
+     * Tell the host the inventory operation itself
+     * completed, even when zero tags were found.
+     */
+    if(totalTags == 0U)
+    {
+        return 1U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * 2. Drain the 0x29 tag buffer
+     * --------------------------------------------------------
+     *
+     * Continue until SILION_ParseTagBuffer()
+     * reports zero tags.
+     */
+    while(1)
+    {
+        SILION_ClearFrame(pSilion);
+        SILION_ClearUartFlags();
+
+        txComplete = 0U;
+
+        /*
+         * Request unread tags with the same metadata
+         * already used by the existing parser:
+         *
+         * 0x00BF =
+         *     Read Count
+         *     RSSI
+         *     Antenna
+         *     Frequency
+         *     Timestamp
+         *     RFU
+         *     Tag Data Length
+         */
+        if(
+            SILION_GetTagBuffer(
+                pSilion,
+                0x00BFU
+            ) == 0U
+        )
+        {
+            return 0U;
+        }
+
+        if(
+            SILION_Application_Transaction(
+                SILION_CMD_GET_TAG_BUFFER
+            ) == 0U
+        )
+        {
+            return 0U;
+        }
+
+        batchCount = 0U;
+
+        if(
+            SILION_ParseTagBuffer(
+                pSilion,
+                tags,
+                32U,
+                &batchCount
+            ) == 0U
+        )
+        {
+            return 0U;
+        }
+
+        /*
+         * No more unread tags.
+         */
+        if(batchCount == 0U)
+        {
+            break;
+        }
+
+        /*
+         * Send each tag using the same TAG format
+         * already used by asynchronous inventory.
+         */
+        for(
+            i = 0U;
+            i < batchCount;
+            i++
+        )
+        {
+            VCP_SendTag(
+                &tags[i]
+            );
+        }
+    }
+
+    /*
+     * Suppress an unused-variable warning on some
+     * compiler configurations.
+     */
+    (void)totalTags;
+
+    return 1U;
+}
+
 
 /*
  * ------------------------------------------------------------
