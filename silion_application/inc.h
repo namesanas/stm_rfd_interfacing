@@ -38,6 +38,14 @@ uint8_t SILION_Application_GetSession(void);
 uint8_t SILION_Application_GetFrequency(void);
 uint8_t SILION_Application_GetRegions(void);
 
+uint8_t SILION_Application_ReadTagData(
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes);
+
 
 /*
  * ------------------------------------------------------------
@@ -62,12 +70,24 @@ uint8_t SILION_Application_SetSession(
     uint8_t session
 );
 
-
+uint8_t SILION_Application_WriteTagData(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint8_t memBank,
+    uint32_t address,
+    const uint8_t *writeData,
+    uint8_t writeDataLength
+);
 /*
  * ------------------------------------------------------------
  * Inventory
  * ------------------------------------------------------------
  */
+uint8_t SILION_Application_SingleInventory(
+        uint16_t timeoutMs);
+uint8_t SILION_Application_SynchronousInventory(
+        uint16_t timeoutMs);
+
 uint8_t SILION_Application_StartInventory(void);
 
 void SILION_Application_StopInventory(void);
