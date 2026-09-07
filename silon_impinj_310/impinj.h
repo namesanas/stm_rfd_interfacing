@@ -67,6 +67,9 @@
 #define SILION_CMD_SINGLE_INVENTORY  0x21U
 #define SILION_CMD_SYNC_INVENTORY    0x22U
 #define SILION_CMD_GET_TAG_BUFFER    0x29U
+#define SILION_CMD_READ_TAG_DATA      0x28U
+#define SILION_CMD_WRITE_TAG_DATA     0x24U
+#define SILION_CMD_WRITE_TAG_EPC      0x23U
 
 #define SILION_CMD_ASYNC_INVENTORY   0xAAU
 #define SILION_ASYNC_START           0x48U
@@ -138,6 +141,8 @@
 #define SILION_READER_CONFIG_KEY_ANTENNA_IDENTITY   0x00U
 #define SILION_READER_CONFIG_KEY_MAX_RSSI            0x06U
 #define SILION_READER_CONFIG_KEY_BANK_IDENTITY       0x08U
+
+#define SILION_STATUS_FAULT_NO_TAGS_FOUND 0x0400
 
 
 
@@ -417,12 +422,45 @@ uint8_t SILION_GetGPO(
 uint8_t SILION_SingleTagInventory(
         Silion_Handle_t *pSilionHandle,
         uint16_t timeoutMs);
+uint8_t SILION_ParseSingleTagInventory(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag);
 uint8_t SILION_SynchronousInventory(
         Silion_Handle_t *pSilionHandle,
         uint16_t timeoutMs);
 uint8_t SILION_GetTagBuffer(
         Silion_Handle_t *pSilionHandle,
         uint16_t metadataFlags);
+uint8_t SILION_ReadTagData(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount);
+uint8_t SILION_ReadTagDataByEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes);
+uint8_t SILION_WriteTagDataByEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        const uint8_t *writeData,
+        uint8_t writeDataLength,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes
+);
+
+uint8_t SILION_ParseReadTagData(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t *data,
+        uint16_t dataSize,
+        uint16_t *dataLength);
 
 uint8_t SILION_ParseTagBuffer(
         Silion_Handle_t *pSilionHandle,
