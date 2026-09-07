@@ -5,6 +5,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static uint8_t HOST_HexNibble(
+    char c
+)
+{
+    if(c >= '0' && c <= '9')
+        return (uint8_t)(c - '0');
+
+    if(c >= 'A' && c <= 'F')
+        return (uint8_t)(c - 'A' + 10U);
+
+    if(c >= 'a' && c <= 'f')
+        return (uint8_t)(c - 'a' + 10U);
+
+    return 0xFFU;
+}
+
 extern void VCP_SendString(const char *text);
 
 #define HOST_RX_BUFFER_SIZE 128U
@@ -70,6 +86,66 @@ static uint8_t HOST_ParseUint16(
         return 0U;
 
     *value = (uint16_t)temp;
+
+    return 1U;
+}
+
+static uint8_t HOST_ParseHexBytes(
+    const char *text,
+    uint8_t *data,
+    uint8_t maxBytes,
+    uint8_t *dataLength
+)
+{
+    uint16_t textLength;
+    uint8_t length;
+    uint8_t i;
+    unsigned int value;
+
+    if(
+        text == NULL ||
+        data == NULL ||
+        dataLength == NULL
+    )
+    {
+        return 0U;
+    }
+
+    textLength = (uint16_t)strlen(text);
+
+    if(
+        textLength == 0U ||
+        (textLength % 2U) != 0U
+    )
+    {
+        return 0U;
+    }
+
+    length = (uint8_t)(textLength / 2U);
+
+    if(length > maxBytes)
+        return 0U;
+
+    for(i = 0U; i < length; i++)
+    {
+        if(
+            sscanf(
+                &text[i * 2U],
+                "%2x",
+                &value
+            ) != 1
+        )
+        {
+            return 0U;
+        }
+
+        if(value > 0xFFU)
+            return 0U;
+
+        data[i] = (uint8_t)value;
+    }
+
+    *dataLength = length;
 
     return 1U;
 }
@@ -163,6 +239,77 @@ void HOST_Interface_Task(void)
                 }
             }
 
+            /*
+             * =================================================
+             * SINGLE POLL
+             *
+             * Format:
+             *     SINGLE_POLL
+             *     SINGLE_POLL,1000
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SINGLE_POLL",
+                    11U
+                ) == 0
+            )
+            {
+                uint16_t timeoutMs = 1000U;
+
+                /*
+                 * Optional timeout:
+                 *
+                 * SINGLE_POLL,1000
+                 */
+                if(hostRxBuffer[11] == ',')
+                {
+                    int value =
+                        atoi(&hostRxBuffer[12]);
+
+                    if(
+                        value >= 1 &&
+                        value <= 65535
+                    )
+                    {
+                        timeoutMs =
+                            (uint16_t)value;
+                    }
+                    else
+                    {
+                        VCP_SendString(
+                            "ERROR,SINGLE_POLL\r\n"
+                        );
+
+                        return;
+                    }
+                }
+
+                if(
+                    SILION_Application_SingleInventory(
+                        timeoutMs
+                    ) == 1U
+                )
+                {
+                    /*
+                     * Tag/no-tag response has already
+                     * been emitted by the application.
+                     *
+                     * Only return the command ACK here.
+                     */
+                    VCP_SendString(
+                        "OK,SINGLE_POLL\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SINGLE_POLL\r\n"
+                    );
+                }
+            }
+
 
             /*
              * =================================================
@@ -176,6 +323,90 @@ void HOST_Interface_Task(void)
                 VCP_SendString(
                     "OK,STOP\r\n"
                 );
+            }
+
+            /*
+             * =================================================
+             * SYNC POLL
+             *
+             * Examples:
+             *
+             *     SYNC_POLL
+             *     SYNC_POLL,1000
+             *
+             * Uses native:
+             *
+             *     0x22 Synchronous Inventory
+             *     0x29 Get Tag Buffer
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "SYNC_POLL",
+                    9U
+                ) == 0
+            )
+            {
+                uint16_t timeoutMs = 1000U;
+
+                /*
+                 * Optional timeout:
+                 *
+                 * SYNC_POLL,1000
+                 */
+                if(hostRxBuffer[9] == ',')
+                {
+                    unsigned int timeout;
+
+                    if(
+                        sscanf(
+                            &hostRxBuffer[10],
+                            "%u",
+                            &timeout
+                        ) != 1
+                        ||
+                        timeout == 0U
+                        ||
+                        timeout > 65535U
+                    )
+                    {
+                        VCP_SendString(
+                            "ERROR,SYNC_POLL\r\n"
+                        );
+
+                        return;
+                    }
+
+                    timeoutMs =
+                        (uint16_t)timeout;
+                }
+                else if(hostRxBuffer[9] != '\0')
+                {
+                    VCP_SendString(
+                        "ERROR,SYNC_POLL\r\n"
+                    );
+
+                    return;
+                }
+
+                if(
+                    SILION_Application_SynchronousInventory(
+                        timeoutMs
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,SYNC_POLL\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,SYNC_POLL\r\n"
+                    );
+                }
             }
 
 
@@ -662,7 +893,257 @@ void HOST_Interface_Task(void)
                 }
             }
 
+            /*
+             * =================================================
+             * READ TAG BY EPC
+             *
+             * Format:
+             *
+             *     READ_TAG,EPC,BANK,ADDRESS,WORDS
+             *
+             * Example:
+             *
+             *     READ_TAG,E2000017221101441890A123,2,0,2
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "READ_TAG,",
+                    9U
+                ) == 0
+            )
+            {
+                char epcString[127];
+                uint8_t epcData[62];
+                uint8_t epcLengthBytes;
 
+                unsigned int bank;
+                unsigned long address;
+                unsigned int words;
+
+                /*
+                 * Parse the EPC string plus numeric parameters.
+                 */
+                if(
+                    sscanf(
+                        &hostRxBuffer[9],
+                        "%126[^,],%u,%lu,%u",
+                        epcString,
+                        &bank,
+                        &address,
+                        &words
+                    ) == 4
+                    &&
+                    bank <= 255U
+                    &&
+                    address <= 0xFFFFFFFFUL
+                    &&
+                    words >= 1U
+                    &&
+                    words <= 96U
+                )
+                {
+                    size_t epcStringLength =
+                        strlen(epcString);
+
+                    /*
+                     * EPC must contain an even number
+                     * of hexadecimal characters.
+                     */
+                    if(
+                        epcStringLength == 0U ||
+                        epcStringLength > 124U ||
+                        (epcStringLength % 2U) != 0U
+                    )
+                    {
+                        VCP_SendString(
+                            "ERROR,READ_TAG\r\n"
+                        );
+                    }
+                    else
+                    {
+                        uint8_t parseOk = 1U;
+
+                        epcLengthBytes =
+                            (uint8_t)(epcStringLength / 2U);
+
+                        for(
+                            uint8_t i = 0U;
+                            i < epcLengthBytes;
+                            i++
+                        )
+                        {
+                            uint8_t high =
+                                HOST_HexNibble(
+                                    epcString[i * 2U]
+                                );
+
+                            uint8_t low =
+                                HOST_HexNibble(
+                                    epcString[(i * 2U) + 1U]
+                                );
+
+                            if(
+                                high == 0xFFU ||
+                                low == 0xFFU
+                            )
+                            {
+                                parseOk = 0U;
+                                break;
+                            }
+
+                            epcData[i] =
+                                (uint8_t)(
+                                    (high << 4) |
+                                    low
+                                );
+                        }
+
+                        if(parseOk == 0U)
+                        {
+                            VCP_SendString(
+                                "ERROR,READ_TAG\r\n"
+                            );
+                        }
+                        else if(
+                            SILION_Application_ReadTagData(
+                                1000U,
+                                (uint8_t)bank,
+                                (uint32_t)address,
+                                (uint8_t)words,
+                                epcData,
+                                epcLengthBytes
+                            ) == 1U
+                        )
+                        {
+                            VCP_SendString(
+                                "OK,READ_TAG\r\n"
+                            );
+                        }
+                        else
+                        {
+                            VCP_SendString(
+                                "ERROR,READ_TAG\r\n"
+                            );
+                        }
+                    }
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,READ_TAG\r\n"
+                    );
+                }
+            }
+
+            /*
+             * =================================================
+             * WRITE TAG DATA
+             *
+             * Format:
+             *
+             * WRITE_TAG,EPC,BANK,ADDRESS,HEX_DATA
+             *
+             * Example:
+             *
+             * WRITE_TAG,E2806894000050328410E5CD,3,2,11223344
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "WRITE_TAG,",
+                    10U
+                ) == 0
+            )
+            {
+                char epcText[63];
+                char dataText[65];
+
+                uint8_t epc[62];
+                uint8_t writeData[64];
+
+                uint8_t epcLengthBytes;
+                uint8_t writeDataLength;
+
+                unsigned int bankTemp;
+                unsigned long addressTemp;
+
+                int parsed;
+
+                epcText[0] = '\0';
+                dataText[0] = '\0';
+
+                parsed =
+                    sscanf(
+                        hostRxBuffer,
+                        "WRITE_TAG,%62[^,],%u,%lu,%64s",
+                        epcText,
+                        &bankTemp,
+                        &addressTemp,
+                        dataText
+                    );
+
+                if(
+                    parsed != 4 ||
+                    bankTemp > 3U ||
+                    addressTemp > 0xFFFFFFFFUL
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_TAG\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        epcText,
+                        epc,
+                        sizeof(epc),
+                        &epcLengthBytes
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_TAG\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        dataText,
+                        writeData,
+                        sizeof(writeData),
+                        &writeDataLength
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_TAG\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_WriteTagData(
+                        epc,
+                        epcLengthBytes,
+                        (uint8_t)bankTemp,
+                        (uint32_t)addressTemp,
+                        writeData,
+                        writeDataLength
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,WRITE_TAG\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_TAG\r\n"
+                    );
+                }
+            }
             /*
              * =================================================
              * UNKNOWN COMMAND
