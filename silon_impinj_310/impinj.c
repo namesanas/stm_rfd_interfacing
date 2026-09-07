@@ -8,6 +8,9 @@
 
 #include "impinj.h"
 #include <stddef.h>
+#include <stdio.h>
+
+extern void VCP_SendString(const char *text);
 
 
 /*
@@ -1170,6 +1173,96 @@ uint8_t SILION_SingleTagInventory(
     );
 }
 
+uint8_t SILION_ParseSingleTagInventory(
+        Silion_Handle_t *pSilionHandle,
+        SILION_Tag_t *tag)
+{
+    uint16_t epcLengthBytes;
+    uint16_t i;
+
+    if(
+        pSilionHandle == NULL ||
+        tag == NULL
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * 0x21 with Option 0x00 returns:
+     *
+     * Option + EPC + Tag CRC
+     *
+     * No metadata.
+     */
+    if(pSilionHandle->expectedLength < 3U)
+    {
+        return 0U;
+    }
+
+    /*
+     * DATA starts at rxBuffer[5].
+     *
+     * DATA =
+     *     Option      1 byte
+     *     EPC         N bytes
+     *     Tag CRC     2 bytes
+     */
+    epcLengthBytes =
+        (uint16_t)pSilionHandle->expectedLength - 3U;
+
+    if(epcLengthBytes > sizeof(tag->epc))
+    {
+        return 0U;
+    }
+
+    /*
+     * Option
+     */
+    if(pSilionHandle->rxBuffer[5] != 0x00U)
+    {
+        return 0U;
+    }
+
+    /*
+     * EPC
+     */
+    for(i = 0U; i < epcLengthBytes; i++)
+    {
+        tag->epc[i] =
+            pSilionHandle->rxBuffer[6U + i];
+    }
+
+    tag->epcLengthBytes =
+        epcLengthBytes;
+
+    tag->epcLengthBits =
+        (uint16_t)(epcLengthBytes * 8U);
+
+    /*
+     * 0x21 does not provide PC.
+     */
+    tag->pcWord = 0U;
+
+    /*
+     * No metadata in this mode.
+     */
+    tag->readCount = 1U;
+    tag->rssi = 0;
+    tag->antenna = 0U;
+    tag->frequencyKHz = 0U;
+    tag->timestampMs = 0U;
+
+    /*
+     * Tag CRC
+     */
+    tag->tagCrc =
+        ((uint16_t)pSilionHandle->rxBuffer[6U + epcLengthBytes] << 8)
+        |
+        pSilionHandle->rxBuffer[7U + epcLengthBytes];
+
+    return 1U;
+}
 /*
  * ============================================================
  * SYNCHRONOUS INVENTORY
@@ -1286,6 +1379,508 @@ uint8_t SILION_GetTagBuffer(
         frame,
         frameLength
     );
+}
+
+/*
+ * ============================================================
+ * READ TAG DATA
+ *
+ * 0x28
+ *
+ * Option    = 0x00
+ * No filter
+ * No access password
+ *
+ * Address is in 16-bit words.
+ * ============================================================
+ */
+uint8_t SILION_ReadTagData(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount)
+{
+    uint8_t data[9];
+    uint8_t frame[16];
+    uint16_t frameLength;
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(wordCount == 0U || wordCount > 96U)
+    {
+        return 0U;
+    }
+
+    /*
+     * Timeout
+     */
+    data[0] =
+        (uint8_t)(timeoutMs >> 8);
+
+    data[1] =
+        (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * Option = 0x00
+     *
+     * No filter.
+     * No access password.
+     */
+    data[2] = 0x00U;
+
+    /*
+     * Memory bank
+     */
+    data[3] = memBank;
+
+    /*
+     * Address - 4 bytes, big endian
+     */
+    data[4] =
+        (uint8_t)(address >> 24);
+
+    data[5] =
+        (uint8_t)(address >> 16);
+
+    data[6] =
+        (uint8_t)(address >> 8);
+
+    data[7] =
+        (uint8_t)(address);
+
+    /*
+     * Word count
+     */
+    data[8] = wordCount;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_READ_TAG_DATA,
+            data,
+            9U,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+/*
+ * ============================================================
+ * READ TAG DATA BY EPC
+ *
+ * 0x28
+ *
+ * Select Option = 0x01
+ *
+ * EPC is used as the tag selection filter.
+ *
+ * Select Address = 0x00000020
+ *
+ * This points to the beginning of the EPC ID
+ * after the PC word.
+ * ============================================================
+ */
+uint8_t SILION_ReadTagDataByEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        uint8_t wordCount,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes)
+{
+    static uint8_t data[80];
+    static uint8_t frame[90];
+    uint16_t dataLength;
+    uint16_t frameLength;
+    uint16_t index;
+
+    if(
+        pSilionHandle == NULL ||
+        epc == NULL
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * EPC must contain at least 1 byte.
+     */
+    if(epcLengthBytes == 0U)
+    {
+        return 0U;
+    }
+
+    /*
+     * EPC maximum supported by the protocol:
+     * 496 bits = 62 bytes.
+     */
+    if(epcLengthBytes > 62U)
+    {
+        return 0U;
+    }
+
+    if(
+        wordCount == 0U ||
+        wordCount > 96U
+    )
+    {
+        return 0U;
+    }
+
+    index = 0U;
+
+    /*
+     * Timeout
+     */
+    data[index++] =
+        (uint8_t)(timeoutMs >> 8);
+
+    data[index++] =
+        (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * Option = 0x01
+     *
+     * EPC select filter.
+     */
+    data[index++] = 0x00U;
+
+    /*
+     * Read memory bank
+     */
+    data[index++] = memBank;
+
+    /*
+     * Read address - 4 bytes
+     *
+     * Address is in words.
+     */
+    data[index++] =
+        (uint8_t)(address >> 24);
+
+    data[index++] =
+        (uint8_t)(address >> 16);
+
+    data[index++] =
+        (uint8_t)(address >> 8);
+
+    data[index++] =
+        (uint8_t)address;
+
+    /*
+     * Word count
+     */
+    data[index++] =
+        wordCount;
+
+    /*
+     * Access password
+     *
+     * For an unlocked tag this is zero.
+     */
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+
+    /*
+     * Select Data Length
+     *
+     * EPC bytes -> bits.
+     *
+     * Example:
+     *   12 byte EPC = 96 bits = 0x60
+     */
+    data[index++] =
+        (uint8_t)(epcLengthBytes * 8U);
+
+    /*
+     * Select Data = EPC
+     */
+    for(
+        uint8_t i = 0U;
+        i < epcLengthBytes;
+        i++
+    )
+    {
+        data[index++] = epc[i];
+    }
+
+    dataLength = index;
+
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_READ_TAG_DATA,
+            data,
+            (uint8_t)dataLength,
+            frame
+        );
+
+    {
+        char debug[256];
+        int pos = 0;
+        uint16_t i;
+
+        pos += sprintf(debug + pos, "DEBUG,READ_TX=");
+
+        for(i = 0; i < frameLength; i++)
+        {
+            pos += sprintf(
+                debug + pos,
+                "%02X",
+                frame[i]
+            );
+
+            if(i < (frameLength - 1U))
+            {
+                pos += sprintf(debug + pos, " ");
+            }
+        }
+
+        pos += sprintf(debug + pos, "\r\n");
+
+        VCP_SendString(debug);
+    }
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_WriteTagDataByEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint8_t memBank,
+        uint32_t address,
+        const uint8_t *writeData,
+        uint8_t writeDataLength,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes)
+{
+    static uint8_t data[100];
+    static uint8_t frame[110];
+
+    uint16_t index;
+    uint16_t frameLength;
+
+    if(
+        pSilionHandle == NULL ||
+        writeData == NULL ||
+        epc == NULL
+    )
+    {
+        return 0U;
+    }
+
+    if(epcLengthBytes == 0U || epcLengthBytes > 62U)
+    {
+        return 0U;
+    }
+
+    /*
+     * Write data must be an even number of bytes.
+     */
+    if(
+        writeDataLength == 0U ||
+        writeDataLength > 64U ||
+        (writeDataLength % 2U) != 0U
+    )
+    {
+        return 0U;
+    }
+
+    index = 0U;
+
+    /*
+     * Timeout
+     */
+    data[index++] =
+        (uint8_t)(timeoutMs >> 8);
+
+    data[index++] =
+        (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * Option = 0x01
+     *
+     * EPC select filter.
+     */
+    data[index++] = 0x01U;
+
+    /*
+     * Write address - 4 bytes
+     *
+     * Address is in 16-bit words.
+     */
+    data[index++] =
+        (uint8_t)(address >> 24);
+
+    data[index++] =
+        (uint8_t)(address >> 16);
+
+    data[index++] =
+        (uint8_t)(address >> 8);
+
+    data[index++] =
+        (uint8_t)address;
+
+    /*
+     * Write memory bank
+     */
+    data[index++] = memBank;
+
+    /*
+     * Access password
+     *
+     * Unlocked tag = 00000000
+     */
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+    data[index++] = 0x00U;
+
+    /*
+     * EPC select length in bits.
+     */
+    data[index++] =
+        (uint8_t)(epcLengthBytes * 8U);
+
+    /*
+     * EPC select data.
+     */
+    for(
+        uint8_t i = 0U;
+        i < epcLengthBytes;
+        i++
+    )
+    {
+        data[index++] = epc[i];
+    }
+
+    /*
+     * Write data.
+     */
+    for(
+        uint8_t i = 0U;
+        i < writeDataLength;
+        i++
+    )
+    {
+        data[index++] = writeData[i];
+    }
+
+    /*
+     * Build 0x24 frame.
+     */
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_WRITE_TAG_DATA,
+            data,
+            (uint8_t)index,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_ParseReadTagData(
+        Silion_Handle_t *pSilionHandle,
+        uint8_t *data,
+        uint16_t dataSize,
+        uint16_t *dataLength)
+{
+    uint16_t index;
+    uint16_t tagDataLength;
+
+    if(
+        pSilionHandle == NULL ||
+        data == NULL ||
+        dataLength == NULL
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * 0x28 response with Option 0x00:
+     *
+     * Option          1
+     * Tag Data Length 2
+     * Data Read       N
+     */
+    if(pSilionHandle->expectedLength < 3U)
+    {
+        return 0U;
+    }
+
+    index = 5U;
+
+    /*
+     * Option
+     */
+    index++;
+
+    /*
+     * Tag Data Length
+     *
+     * This should be zero for 0x28 itself.
+     */
+    tagDataLength =
+        ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
+        |
+        pSilionHandle->rxBuffer[index + 1U];
+
+    index += 2U;
+
+    /*
+     * Remaining response bytes are the memory data.
+     */
+    if(index > pSilionHandle->rxIndex)
+    {
+        return 0U;
+    }
+
+    {
+        uint16_t bytesAvailable =
+            pSilionHandle->rxIndex - index;
+
+        if(bytesAvailable > dataSize)
+        {
+            return 0U;
+        }
+
+        for(
+            uint16_t i = 0U;
+            i < bytesAvailable;
+            i++
+        )
+        {
+            data[i] =
+                pSilionHandle->rxBuffer[index + i];
+        }
+
+        *dataLength =
+            bytesAvailable;
+    }
+
+    (void)tagDataLength;
+
+    return 1U;
 }
 
 uint8_t SILION_ProcessAsyncFrame(
