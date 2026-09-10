@@ -78,6 +78,13 @@ uint8_t SILION_Application_WriteTagData(
     const uint8_t *writeData,
     uint8_t writeDataLength
 );
+uint8_t SILION_Application_WriteTagEPC(
+    const uint8_t *oldEpc,
+    uint8_t oldEpcLengthBytes,
+    const uint8_t *newEpc,
+    uint8_t newEpcLengthBytes
+);
+
 /*
  * ------------------------------------------------------------
  * Inventory
@@ -90,7 +97,7 @@ uint8_t SILION_Application_SynchronousInventory(
 
 uint8_t SILION_Application_StartInventory(void);
 
-void SILION_Application_StopInventory(void);
+uint8_t SILION_Application_StopInventory(void);
 
 SILION_ApplicationState_t
 SILION_Application_GetState(void);
