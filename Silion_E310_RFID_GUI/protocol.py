@@ -24,7 +24,7 @@ def parse_line(line: str):
     head = head.upper()
     if head in {'OK','ERROR'}:
         return head, tail
-    if head in {'STATUS','VERSION','SERIAL','TEMP','REGION','ANTENNA','POWER','PROTOCOL','SESSION','FREQ','REGIONS'}:
+    if head in {'STATUS','VERSION','SERIAL','TEMP','REGION','ANTENNA','POWER','PROTOCOL','SESSION','FREQ','REGIONS','READ_DATA'}:
         values={'_csv':[]}
         for p in [x.strip() for x in tail.split(',') if x.strip()]:
             if '=' in p:
