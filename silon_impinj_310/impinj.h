@@ -81,6 +81,10 @@
 
 #define SILION_CMD_SET_REGION       0x97U
 #define SILION_REGION_FULL_BAND     0xFFU
+#define SILION_REGION_EU			0x08U
+#define SILION_REGION_NORTH_AMERICA 0x01U
+#define SILION_REGION_CHINA_1		0x06U
+#define SILION_REGION_CHINS_2		0x0AU
 
 #define SILION_CMD_SET_ANTENNA_PORTS   0x91U
 
@@ -168,7 +172,7 @@ typedef enum
 
 /*
  * ============================================================
- * APPLICATION EVENTS
+ * APPLICATION EVENTS how can i create a shortcut on windows desktop of a gui written in python whick contains a main file
  * ============================================================
  */
 
@@ -455,6 +459,15 @@ uint8_t SILION_WriteTagDataByEPC(
         const uint8_t *epc,
         uint8_t epcLengthBytes
 );
+uint8_t SILION_WriteTagEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        const uint8_t *oldEpc,
+        uint8_t oldEpcLengthBytes,
+        const uint8_t *newEpc,
+        uint8_t newEpcLengthBytes
+);
+
 
 uint8_t SILION_ParseReadTagData(
         Silion_Handle_t *pSilionHandle,
