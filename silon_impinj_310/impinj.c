@@ -267,8 +267,8 @@ uint8_t SILION_SendFrame(
         frameLength
     );
 
-
     return 1;
+
 }
 
 
@@ -1497,160 +1497,148 @@ uint8_t SILION_ReadTagDataByEPC(
         const uint8_t *epc,
         uint8_t epcLengthBytes)
 {
+    /*
+     * READ TAG DATA - COMMAND 0x28
+     *
+     * Filtered EPC format:
+     *
+     * Timeout      2
+     * Option       1       = 0x01
+     * MemBank      1
+     * Address      4
+     * Word Count   1
+     * Access Pwd   4
+     * Sel Length   1       = EPC length in bits
+     * Sel Data     N       = EPC
+     */
+
     static uint8_t data[80];
     static uint8_t frame[90];
-    uint16_t dataLength;
+
+    uint16_t index = 0U;
     uint16_t frameLength;
-    uint16_t index;
 
-    if(
-        pSilionHandle == NULL ||
-        epc == NULL
-    )
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(epc == NULL)
+    {
+        return 0U;
+    }
+
+    if(epcLengthBytes == 0U || epcLengthBytes > 62U)
+    {
+        return 0U;
+    }
+
+    if(wordCount == 0U || wordCount > 96U)
     {
         return 0U;
     }
 
     /*
-     * EPC must contain at least 1 byte.
-     */
-    if(epcLengthBytes == 0U)
-    {
-        return 0U;
-    }
-
-    /*
-     * EPC maximum supported by the protocol:
-     * 496 bits = 62 bytes.
-     */
-    if(epcLengthBytes > 62U)
-    {
-        return 0U;
-    }
-
-    if(
-        wordCount == 0U ||
-        wordCount > 96U
-    )
-    {
-        return 0U;
-    }
-
-    index = 0U;
-
-    /*
+     * ----------------------------------------------------------
      * Timeout
+     * ----------------------------------------------------------
      */
-    data[index++] =
-        (uint8_t)(timeoutMs >> 8);
-
-    data[index++] =
-        (uint8_t)(timeoutMs & 0xFFU);
+    data[index++] = (uint8_t)(timeoutMs >> 8);
+    data[index++] = (uint8_t)(timeoutMs & 0xFFU);
 
     /*
-     * Option = 0x01
+     * ----------------------------------------------------------
+     * No filter
      *
-     * EPC select filter.
+     * 0x00 = first tag that responds.
+     *
+     * In this mode the protocol does NOT include:
+     * - access password
+     * - select length
+     * - select data
+     * ----------------------------------------------------------
      */
     data[index++] = 0x00U;
 
     /*
-     * Read memory bank
+     * ----------------------------------------------------------
+     * Memory bank
+     * ----------------------------------------------------------
      */
     data[index++] = memBank;
 
     /*
-     * Read address - 4 bytes
-     *
-     * Address is in words.
+     * ----------------------------------------------------------
+     * Starting address
+     * ----------------------------------------------------------
      */
-    data[index++] =
-        (uint8_t)(address >> 24);
-
-    data[index++] =
-        (uint8_t)(address >> 16);
-
-    data[index++] =
-        (uint8_t)(address >> 8);
-
-    data[index++] =
-        (uint8_t)address;
+    data[index++] = (uint8_t)(address >> 24);
+    data[index++] = (uint8_t)(address >> 16);
+    data[index++] = (uint8_t)(address >> 8);
+    data[index++] = (uint8_t)address;
 
     /*
-     * Word count
+     * ----------------------------------------------------------
+     * Number of words
+     * ----------------------------------------------------------
      */
-    data[index++] =
-        wordCount;
-
+    data[index++] = wordCount;
     /*
-     * Access password
-     *
-     * For an unlocked tag this is zero.
+     * ----------------------------------------------------------
+     * Build command frame
+     * ----------------------------------------------------------
      */
-    data[index++] = 0x00U;
-    data[index++] = 0x00U;
-    data[index++] = 0x00U;
-    data[index++] = 0x00U;
-
-    /*
-     * Select Data Length
-     *
-     * EPC bytes -> bits.
-     *
-     * Example:
-     *   12 byte EPC = 96 bits = 0x60
-     */
-    data[index++] =
-        (uint8_t)(epcLengthBytes * 8U);
-
-    /*
-     * Select Data = EPC
-     */
-    for(
-        uint8_t i = 0U;
-        i < epcLengthBytes;
-        i++
-    )
-    {
-        data[index++] = epc[i];
-    }
-
-    dataLength = index;
-
     frameLength =
         SILION_BuildCommandFrame(
             SILION_CMD_READ_TAG_DATA,
             data,
-            (uint8_t)dataLength,
+            (uint8_t)index,
             frame
         );
 
+    /*
+     * ----------------------------------------------------------
+     * Debug - complete TX frame
+     * ----------------------------------------------------------
+     */
     {
         char debug[256];
         int pos = 0;
-        uint16_t i;
+        uint16_t j;
 
-        pos += sprintf(debug + pos, "DEBUG,READ_TX=");
+        pos += sprintf(
+            debug + pos,
+            "DEBUG,READ_TX="
+        );
 
-        for(i = 0; i < frameLength; i++)
+        for(j = 0U; j < frameLength; j++)
         {
             pos += sprintf(
                 debug + pos,
-                "%02X",
-                frame[i]
+                "%02X%s",
+                frame[j],
+                (j + 1U < frameLength) ? " " : ""
             );
-
-            if(i < (frameLength - 1U))
-            {
-                pos += sprintf(debug + pos, " ");
-            }
         }
 
-        pos += sprintf(debug + pos, "\r\n");
+        pos += sprintf(
+            debug + pos,
+            "\r\n"
+        );
 
         VCP_SendString(debug);
     }
 
+    /*
+     * ----------------------------------------------------------
+     * Send asynchronously.
+     *
+     * IMPORTANT:
+     * buffers are static because USART_SendDataIT()
+     * continues using the buffer after this function returns.
+     * ----------------------------------------------------------
+     */
     return SILION_SendFrame(
         pSilionHandle,
         frame,
@@ -1668,17 +1656,40 @@ uint8_t SILION_WriteTagDataByEPC(
         const uint8_t *epc,
         uint8_t epcLengthBytes)
 {
+    /*
+     * WRITE TAG DATA - COMMAND 0x24
+     *
+     * Filtered EPC format:
+     *
+     * Timeout       2
+     * Option        1       = 0x01
+     * Write Addr    4
+     * MemBank       1
+     * Access Pwd    4
+     * Sel Length    1       = EPC length in bits
+     * Sel Data      N       = EPC
+     * Write Data    N
+     */
+
     static uint8_t data[100];
     static uint8_t frame[110];
 
-    uint16_t index;
+    uint16_t index = 0U;
     uint16_t frameLength;
 
-    if(
-        pSilionHandle == NULL ||
-        writeData == NULL ||
-        epc == NULL
-    )
+    uint8_t i;
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(writeData == NULL)
+    {
+        return 0U;
+    }
+
+    if(epc == NULL)
     {
         return 0U;
     }
@@ -1689,61 +1700,173 @@ uint8_t SILION_WriteTagDataByEPC(
     }
 
     /*
-     * Write data must be an even number of bytes.
+     * Write data:
+     *
+     * - must not be zero length
+     * - maximum 64 bytes
+     * - must contain whole 16-bit words
      */
-    if(
-        writeDataLength == 0U ||
-        writeDataLength > 64U ||
-        (writeDataLength % 2U) != 0U
-    )
+    if(writeDataLength == 0U ||
+       writeDataLength > 64U ||
+       (writeDataLength & 0x01U) != 0U)
     {
         return 0U;
     }
 
-    index = 0U;
-
     /*
+     * ----------------------------------------------------------
      * Timeout
+     * ----------------------------------------------------------
      */
-    data[index++] =
-        (uint8_t)(timeoutMs >> 8);
-
-    data[index++] =
-        (uint8_t)(timeoutMs & 0xFFU);
+    data[index++] = (uint8_t)(timeoutMs >> 8);
+    data[index++] = (uint8_t)(timeoutMs & 0xFFU);
 
     /*
-     * Option = 0x01
-     *
-     * EPC select filter.
+     * No filter.
      */
-    data[index++] = 0x01U;
+    data[index++] = 0x00U;
 
     /*
-     * Write address - 4 bytes
-     *
-     * Address is in 16-bit words.
+     * Write address.
      */
-    data[index++] =
-        (uint8_t)(address >> 24);
-
-    data[index++] =
-        (uint8_t)(address >> 16);
-
-    data[index++] =
-        (uint8_t)(address >> 8);
-
-    data[index++] =
-        (uint8_t)address;
+    data[index++] = (uint8_t)(address >> 24);
+    data[index++] = (uint8_t)(address >> 16);
+    data[index++] = (uint8_t)(address >> 8);
+    data[index++] = (uint8_t)address;
 
     /*
-     * Write memory bank
+     * Memory bank.
      */
     data[index++] = memBank;
 
     /*
-     * Access password
+     * Write data.
+     */
+    for(i = 0U; i < writeDataLength; i++)
+    {
+        data[index++] = writeData[i];
+    }
+
+
+    /*
+     * ----------------------------------------------------------
+     * Build command frame
+     * ----------------------------------------------------------
+     */
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_WRITE_TAG_DATA,
+            data,
+            (uint8_t)index,
+            frame
+        );
+
+    /*
+     * ----------------------------------------------------------
+     * Debug - complete TX frame
+     * ----------------------------------------------------------
+     */
+    {
+        char debug[256];
+        int pos = 0;
+        uint16_t j;
+
+        pos += sprintf(
+            debug + pos,
+            "DEBUG,WRITE_TX="
+        );
+
+        for(j = 0U; j < frameLength; j++)
+        {
+            pos += sprintf(
+                debug + pos,
+                "%02X%s",
+                frame[j],
+                (j + 1U < frameLength) ? " " : ""
+            );
+        }
+
+        pos += sprintf(
+            debug + pos,
+            "\r\n"
+        );
+
+        VCP_SendString(debug);
+    }
+
+    /*
+     * ----------------------------------------------------------
+     * Send asynchronously.
+     * ----------------------------------------------------------
+     */
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_WriteTagEPC(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        const uint8_t *oldEpc,
+        uint8_t oldEpcLengthBytes,
+        const uint8_t *newEpc,
+        uint8_t newEpcLengthBytes)
+{
+    static uint8_t data[140];
+    static uint8_t frame[150];
+
+    uint16_t index = 0U;
+    uint16_t frameLength;
+    uint8_t i;
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(oldEpc == NULL || newEpc == NULL)
+    {
+        return 0U;
+    }
+
+    /*
+     * EPCs must contain whole 16-bit words.
+     */
+    if(oldEpcLengthBytes == 0U ||
+       oldEpcLengthBytes > 31U ||
+       (oldEpcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    if(newEpcLengthBytes == 0U ||
+       newEpcLengthBytes > 62U ||
+       (newEpcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    /*
+     * ----------------------------------------------------------
+     * Timeout
+     * ----------------------------------------------------------
+     */
+    data[index++] = (uint8_t)(timeoutMs >> 8);
+    data[index++] = (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * ----------------------------------------------------------
+     * EPC-value selection
      *
-     * Unlocked tag = 00000000
+     * Option 0x01 = select tag by EPC value.
+     * ----------------------------------------------------------
+     */
+    data[index++] = 0x01U;
+
+    /*
+     * Access password = 00000000.
      */
     data[index++] = 0x00U;
     data[index++] = 0x00U;
@@ -1754,42 +1877,70 @@ uint8_t SILION_WriteTagDataByEPC(
      * EPC select length in bits.
      */
     data[index++] =
-        (uint8_t)(epcLengthBytes * 8U);
+        (uint8_t)(oldEpcLengthBytes * 8U);
 
     /*
-     * EPC select data.
+     * Existing EPC used as selection data.
      */
-    for(
-        uint8_t i = 0U;
-        i < epcLengthBytes;
-        i++
-    )
+    for(i = 0U; i < oldEpcLengthBytes; i++)
     {
-        data[index++] = epc[i];
+        data[index++] = oldEpc[i];
     }
 
     /*
-     * Write data.
+     * ----------------------------------------------------------
+     * New EPC
+     *
+     * Command 0x23 writes the EPC and updates the EPC length
+     * information in the tag's PC word.
+     * ----------------------------------------------------------
      */
-    for(
-        uint8_t i = 0U;
-        i < writeDataLength;
-        i++
-    )
+    for(i = 0U; i < newEpcLengthBytes; i++)
     {
-        data[index++] = writeData[i];
+        data[index++] = newEpc[i];
     }
 
     /*
-     * Build 0x24 frame.
+     * Build command 0x23.
      */
     frameLength =
         SILION_BuildCommandFrame(
-            SILION_CMD_WRITE_TAG_DATA,
+            SILION_CMD_WRITE_TAG_EPC,
             data,
             (uint8_t)index,
             frame
         );
+
+    /*
+     * Debug - complete TX frame.
+     */
+    {
+        char debug[300];
+        int pos = 0;
+        uint16_t j;
+
+        pos += sprintf(
+            debug + pos,
+            "DEBUG,WRITE_EPC_TX="
+        );
+
+        for(j = 0U; j < frameLength; j++)
+        {
+            pos += sprintf(
+                debug + pos,
+                "%02X%s",
+                frame[j],
+                (j + 1U < frameLength) ? " " : ""
+            );
+        }
+
+        pos += sprintf(
+            debug + pos,
+            "\r\n"
+        );
+
+        VCP_SendString(debug);
+    }
 
     return SILION_SendFrame(
         pSilionHandle,
@@ -1798,14 +1949,15 @@ uint8_t SILION_WriteTagDataByEPC(
     );
 }
 
+
 uint8_t SILION_ParseReadTagData(
         Silion_Handle_t *pSilionHandle,
         uint8_t *data,
         uint16_t dataSize,
         uint16_t *dataLength)
 {
-    uint16_t index;
-    uint16_t tagDataLength;
+    uint16_t bytesAvailable;
+    uint16_t i;
 
     if(
         pSilionHandle == NULL ||
@@ -1817,71 +1969,76 @@ uint8_t SILION_ParseReadTagData(
     }
 
     /*
-     * 0x28 response with Option 0x00:
+     * ----------------------------------------------------------
+     * Actual 0x28 response observed from the E310:
      *
-     * Option          1
-     * Tag Data Length 2
-     * Data Read       N
+     * FF
+     * LEN
+     * CMD
+     * STATUS MSB
+     * STATUS LSB
+     * OPTION
+     * DATA...
+     * CRC MSB
+     * CRC LSB
+     *
+     * The actual response does NOT contain the two-byte
+     * Tag Data Length field assumed by the previous parser.
+     * ----------------------------------------------------------
      */
-    if(pSilionHandle->expectedLength < 3U)
+
+    /*
+     * At minimum we need:
+     *
+     * OPTION + at least one DATA byte
+     */
+    if(pSilionHandle->expectedLength < 2U)
     {
         return 0U;
     }
 
-    index = 5U;
-
     /*
-     * Option
-     */
-    index++;
-
-    /*
-     * Tag Data Length
+     * ----------------------------------------------------------
+     * DATA begins at rxBuffer[6]
      *
-     * This should be zero for 0x28 itself.
+     * rxBuffer[5] = Option
+     *
+     * expectedLength counts:
+     *
+     *     Option + Data
+     *
+     * Therefore:
+     *
+     *     Data bytes = expectedLength - 1
+     * ----------------------------------------------------------
      */
-    tagDataLength =
-        ((uint16_t)pSilionHandle->rxBuffer[index] << 8)
-        |
-        pSilionHandle->rxBuffer[index + 1U];
+    bytesAvailable =
+        (uint16_t)pSilionHandle->expectedLength - 1U;
 
-    index += 2U;
-
-    /*
-     * Remaining response bytes are the memory data.
-     */
-    if(index > pSilionHandle->rxIndex)
+    if(bytesAvailable > dataSize)
     {
         return 0U;
     }
 
+    /*
+     * ----------------------------------------------------------
+     * Copy only actual tag data.
+     *
+     * CRC is NOT included because expectedLength stops before
+     * the two CRC bytes.
+     * ----------------------------------------------------------
+     */
+    for(i = 0U; i < bytesAvailable; i++)
     {
-        uint16_t bytesAvailable =
-            pSilionHandle->rxIndex - index;
-
-        if(bytesAvailable > dataSize)
-        {
-            return 0U;
-        }
-
-        for(
-            uint16_t i = 0U;
-            i < bytesAvailable;
-            i++
-        )
-        {
-            data[i] =
-                pSilionHandle->rxBuffer[index + i];
-        }
-
-        *dataLength =
-            bytesAvailable;
+        data[i] =
+            pSilionHandle->rxBuffer[6U + i];
     }
 
-    (void)tagDataLength;
+    *dataLength = bytesAvailable;
 
     return 1U;
 }
+
 
 uint8_t SILION_ProcessAsyncFrame(
         Silion_Handle_t *pSilionHandle,
@@ -3156,6 +3313,46 @@ void SILION_ProcessByte(
                 )
             )
             {
+
+
+
+            	/*
+            	 * --------------------------------------------------------
+            	 * DEBUG: print the complete validated RX frame
+            	 * --------------------------------------------------------
+            	 */
+            	{
+            	    char debug[512];
+            	    int pos = 0;
+            	    uint16_t i;
+
+            	    pos += sprintf(
+            	        debug + pos,
+            	        "DEBUG,RX_RAW,LEN=%u,RXINDEX=%u,FRAME=",
+            	        pSilionHandle->expectedLength,
+            	        pSilionHandle->rxIndex
+            	    );
+
+            	    for(i = 0U; i < pSilionHandle->rxIndex; i++)
+            	    {
+            	        pos += sprintf(
+            	            debug + pos,
+            	            "%02X%s",
+            	            pSilionHandle->rxBuffer[i],
+            	            (i + 1U < pSilionHandle->rxIndex) ? " " : ""
+            	        );
+            	    }
+
+            	    pos += sprintf(
+            	        debug + pos,
+            	        ",CMD=%02X,STATUS=%04X\r\n",
+            	        pSilionHandle->command,
+            	        pSilionHandle->status
+            	    );
+
+            	    VCP_SendString(debug);
+            	}
+
                 /*
                  * --------------------------------------------------------
                  * ASYNCHRONOUS INVENTORY FRAME
@@ -3166,23 +3363,63 @@ void SILION_ProcessByte(
                  * Handle them immediately instead of treating them like
                  * a normal request/reply transaction.
                  */
-                if(
-                    pSilionHandle->command
-                    ==
-                    SILION_CMD_ASYNC_INVENTORY
-                )
-                {
-                	 SILION_ProcessAsyncFrame(
-                	        pSilionHandle,
-                	        &asyncTag);
-                }
-                else
-                {
-                    /*
-                     * Normal request/reply frame.
-                     */
-                    pSilionHandle->frameReady = 1;
-                }
+            	if(
+            	    pSilionHandle->command
+            	    ==
+            	    SILION_CMD_ASYNC_INVENTORY
+            	)
+            	{
+            	    /*
+            	     * --------------------------------------------------------
+            	     * 0xAA is used for both:
+            	     *
+            	     * 1. unsolicited async tag packets
+            	     * 2. normal response to async STOP (0xAA49)
+            	     *
+            	     * STOP response starts with:
+            	     *
+            	     *     "Moduletech" + 0xAA49
+            	     *
+            	     * Treat the STOP response as a normal transaction
+            	     * response so SILION_WaitForResponse() can see it.
+            	     * --------------------------------------------------------
+            	     */
+            	    if(
+            	        pSilionHandle->expectedLength >= 12U &&
+            	        pSilionHandle->rxBuffer[5U]  == 'M' &&
+            	        pSilionHandle->rxBuffer[6U]  == 'o' &&
+            	        pSilionHandle->rxBuffer[7U]  == 'd' &&
+            	        pSilionHandle->rxBuffer[8U]  == 'u' &&
+            	        pSilionHandle->rxBuffer[9U]  == 'l' &&
+            	        pSilionHandle->rxBuffer[10U] == 'e' &&
+            	        pSilionHandle->rxBuffer[11U] == 't' &&
+            	        pSilionHandle->rxBuffer[12U] == 'e' &&
+            	        pSilionHandle->rxBuffer[13U] == 'c' &&
+            	        pSilionHandle->rxBuffer[14U] == 'h' &&
+            	        pSilionHandle->rxBuffer[15U] == SILION_CMD_ASYNC_INVENTORY &&
+            	        pSilionHandle->rxBuffer[16U] == SILION_ASYNC_STOP
+            	    )
+            	    {
+            	        /*
+            	         * This is the response to STOP (0xAA49).
+            	         */
+            	        pSilionHandle->frameReady = 1U;
+            	    }
+            	    else
+            	    {
+            	        /*
+            	         * Normal unsolicited async packet.
+            	         */
+            	        SILION_ProcessAsyncFrame(
+            	            pSilionHandle,
+            	            &asyncTag
+            	        );
+            	    }
+            	}
+            	else
+            	{
+            	    pSilionHandle->frameReady = 1U;
+            	}
             }
             else
             {
