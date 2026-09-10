@@ -615,7 +615,7 @@ void SILION_ClearUartFlags(void)
  * ============================================================
  */
 
-static void SILION_ClearRxQueue(void)
+ void SILION_ClearRxQueue(void)
 {
     uint16_t i;
 
@@ -728,24 +728,36 @@ static void SILION_DelayMs(uint32_t delayMs)
 
 int SILION_WaitForResponse(uint32_t timeoutMs)
 {
-    uint32_t start;
+    uint32_t startTime;
 
-    start = g_msTick;
+    startTime = g_msTick;
 
-    while((g_msTick - start) < timeoutMs)
+    while((g_msTick - startTime) < timeoutMs)
     {
+        /*
+         * Process any received bytes.
+         */
         SILION_ProcessRxQueue();
 
+        /*
+         * UART errors.
+         */
         if(rxORE || rxFE || rxNE || rxPE)
         {
             return -1;
         }
 
+        /*
+         * SILION parser rejected frame.
+
         if(silion.frameError)
         {
             return -2;
         }
-
+	*/
+        /*
+         * Complete valid frame.
+         */
         if(SILION_IsFrameReady(&silion))
         {
             return 1;
@@ -754,7 +766,6 @@ int SILION_WaitForResponse(uint32_t timeoutMs)
 
     return 0;
 }
-
 /*
  * ============================================================
  * WAIT FOR TX COMPLETE
@@ -905,7 +916,10 @@ int main(void)
     /*
      * --------------------------------------------------------
      * DEBUG CONSOLE succesful now move ahead
-     * okay both of them are working now lets go ahead
+     *
+     * so both of application layers are working and
+     * host late provides a concrete evidence of why was it not working before and why now working so
+     * so the startup sequence concludes in pretty much all the same without any formalities
      * --------------------------------------------------------
      */
     initialise_monitor_handles();
@@ -954,12 +968,13 @@ int main(void)
     /*
      * --------------------------------------------------------
      * 4. SILION DRIVER
+     * SILION_REGION_FULL_BAND
      * --------------------------------------------------------
      */
 
     SILION_Init(&silion, &usart3);
 
-    readerConfig.region      = SILION_REGION_FULL_BAND;
+    readerConfig.region      = SILION_REGION_CHINA_1;
 
     readerConfig.txAntenna   = 1U;
     readerConfig.rxAntenna   = 1U;
