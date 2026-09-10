@@ -11,6 +11,7 @@
 extern void SILION_ProcessRxQueue(void);
 extern void VCP_SendTag(const SILION_Tag_t *tag);
 extern void SILION_ClearUartFlags(void);
+extern void SILION_ClearRxQueue(void);
 
 extern volatile uint8_t txComplete;
 extern volatile uint32_t silionAsyncPacketCount;
@@ -32,7 +33,11 @@ static uint8_t SILION_Application_Transaction(
     uint8_t expectedCommand
 )
 {
+	//wait bet
 	 int result;
+
+
+
 
 	    /*
 	     * --------------------------------------------------------
@@ -55,7 +60,7 @@ static uint8_t SILION_Application_Transaction(
 	     * 2. Wait for SILION response
 	     * --------------------------------------------------------
 	     */
-	    result = SILION_WaitForResponse(1000U);
+	    result = SILION_WaitForResponse(5000U);
 
 	    if(result == 0)
 	    {
@@ -364,7 +369,7 @@ uint8_t SILION_Application_ConfigureReader(void)
      * --------------------------------------------------------
      * 0x9B SET GEN2 SESSION
      * --------------------------------------------------------
-     */
+
 
     SILION_ClearFrame(pSilion);
     SILION_ClearUartFlags();
@@ -381,17 +386,92 @@ uint8_t SILION_Application_ConfigureReader(void)
     {
         return 0U;
     }
+    */
+
+    /*
+     * --------------------------------------------------------
+     * Explicitly restore Gen2 Target = Static A
+     * --------------------------------------------------------
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+    txComplete = 0U;
+
+    if(SILION_SetProtocolTarget(
+           pSilion,
+
+       ) == 0U)
+    {
+        return 0U;
+    }
+
+    if(SILION_Application_Transaction(
+           SILION_CMD_SET_PROTOCOL_CONFIG) == 0U)
+    {
+        return 0U;
+    }
+    */
 
 
     /*
      * --------------------------------------------------------
-     * Configuration complete.
+     * Explicitly restore Gen2 Q = Dynamic
      * --------------------------------------------------------
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+    txComplete = 0U;
+
+    if(SILION_SetProtocolQ(
+           pSilion,
+           0x00U,
+           0x00U
+       ) == 0U)
+    {
+        return 0U;
+    }
+
+    if(SILION_Application_Transaction(
+           SILION_CMD_SET_PROTOCOL_CONFIG) == 0U)
+    {
+        return 0U;
+    }
+
+*/
+
+    /*
+     * --------------------------------------------------------
+     * RF WARM-UP INVENTORY
+     * --------------------------------------------------------
+     */
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_SingleTagInventory(
+            pSilion,
+            2000U
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    SILION_Application_Transaction(SILION_CMD_SINGLE_TAG_INVENTORY);
+
+    /*
+     * 0x0400 here is expected/acceptable.
+     * The purpose is to wake/settle the RF path, not to
+     * require a tag to be present.
      */
 
     SILION_ClearFrame(pSilion);
 
     return 1U;
+
 }
 
 uint8_t SILION_Application_GetVersion(void)
@@ -1143,8 +1223,10 @@ uint8_t SILION_Application_WriteTagData(
     {
         uint8_t attempt;
 
-        for(attempt = 0U; attempt < 3U; attempt++)
+        for(attempt = 0U; attempt < 1U; attempt++)
         {
+        	SILION_ClearRxQueue();
+
             if(SILION_Application_Transaction(
                     SILION_CMD_WRITE_TAG_DATA) == 1U)
             {
@@ -1183,6 +1265,76 @@ uint8_t SILION_Application_WriteTagData(
 
     return 1U;
 }
+
+/*
+ * ------------------------------------------------------------
+ * WRITE TAG EPC
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_WriteTagEPC(
+    const uint8_t *oldEpc,
+    uint8_t oldEpcLengthBytes,
+    const uint8_t *newEpc,
+    uint8_t newEpcLengthBytes
+)
+{
+    if(pSilion == NULL)
+        return 0U;
+
+    if(appState != SILION_APP_IDLE)
+        return 0U;
+
+    if(oldEpc == NULL || newEpc == NULL)
+        return 0U;
+
+    if(oldEpcLengthBytes == 0U ||
+       oldEpcLengthBytes > 31U ||
+       (oldEpcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    if(newEpcLengthBytes == 0U ||
+       newEpcLengthBytes > 62U ||
+       (newEpcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_WriteTagEPC(
+            pSilion,
+            5000U,
+            oldEpc,
+            oldEpcLengthBytes,
+            newEpc,
+            newEpcLengthBytes
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_WRITE_TAG_EPC
+        ) == 0U
+    )
+    {
+        SILION_ClearFrame(pSilion);
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+
+    return 1U;
+}
+
 /*
  * ------------------------------------------------------------
  * READ TAG DATA
@@ -1218,45 +1370,64 @@ uint8_t SILION_Application_ReadTagData(
         return 0U;
     }
 
-    SILION_ClearFrame(pSilion);
-    SILION_ClearUartFlags();
-
-    txComplete = 0U;
-
-    if(
-        SILION_ReadTagDataByEPC(
-            pSilion,
-            1000,
-            memBank,
-            address,
-            wordCount,
-            epc,
-            epcLengthBytes
-        ) == 0U
-    )
     {
-        return 0U;
-    }
+        uint8_t attempt;
+        uint8_t success = 0U;
 
-    if(
-        SILION_Application_Transaction(
-            SILION_CMD_READ_TAG_DATA
-        ) == 0U
-    )
-    {
-        return 0U;
-    }
+        for(attempt = 0U; attempt < 1U; attempt++)
+        {
+        	SILION_ClearRxQueue();
+            SILION_ClearFrame(pSilion);
+            SILION_ClearUartFlags();
 
-    if(
-        SILION_ParseReadTagData(
-            pSilion,
-            data,
-            sizeof(data),
-            &dataLength
-        ) == 0U
-    )
-    {
-        return 0U;
+            txComplete = 0U;
+
+            if(
+                SILION_ReadTagDataByEPC(
+                    pSilion,
+                    1000U,
+                    memBank,
+                    address,
+                    wordCount,
+                    epc,
+                    epcLengthBytes
+                ) != 0U
+            )
+            {
+                if(
+                    SILION_Application_Transaction(
+                        SILION_CMD_READ_TAG_DATA
+                    ) == 1U
+                )
+                {
+                    if(
+                        SILION_ParseReadTagData(
+                            pSilion,
+                            data,
+                            sizeof(data),
+                            &dataLength
+                        ) != 0U
+                    )
+                    {
+                        success = 1U;
+                        break;
+                    }
+                }
+            }
+
+            SILION_ClearFrame(pSilion);
+
+            if(attempt < 2U)
+            {
+                SILION_Application_DelayMs(100U);
+            }
+        }
+
+        if(success == 0U)
+        {
+            SILION_ClearFrame(pSilion);
+            return 0U;
+        }
     }
 
     /*
@@ -1318,75 +1489,78 @@ uint8_t SILION_Application_SingleInventory(
         return 0U;
     }
 
-    /*
-     * Start with a clean RX transaction.
-     */
-    SILION_ClearFrame(pSilion);
-    SILION_ClearUartFlags();
-
-    txComplete = 0U;
-
-    /*
-     * Send native 0x21.
-     */
-    if(
-        SILION_SingleTagInventory(
-            pSilion,
-            timeoutMs
-        ) == 0U
-    )
     {
-        return 0U;
-    }
+            uint8_t attempt;
 
-    /*
-     * Wait for TX completion and the module reply.
-     */
-    if(
-        SILION_Application_Transaction(
-            SILION_CMD_SINGLE_TAG_INVENTORY
-        ) == 0U
-    )
-    {
-        /*
-         * No tag is also a legitimate reader response.
-         */
-        if(
-            SILION_GetStatus(pSilion)
-            ==
-            SILION_STATUS_FAULT_NO_TAGS_FOUND
-        )
-        {
-            VCP_SendString(
-                "NO_TAG\r\n"
-            );
+            for(attempt = 0U; attempt < 3U; attempt++)
+            {
+            	SILION_ClearRxQueue();
+                SILION_ClearFrame(pSilion);
+                SILION_ClearUartFlags();
 
-            return 1U;
+
+                txComplete = 0U;
+
+                if(
+                    SILION_SingleTagInventory(
+                        pSilion,
+                        timeoutMs
+                    ) == 0U
+                )
+                {
+                    return 0U;
+                }
+
+                if(
+                    SILION_Application_Transaction(
+                        SILION_CMD_SINGLE_TAG_INVENTORY
+                    ) == 1U
+                )
+                {
+                    if(
+                        SILION_ParseSingleTagInventory(
+                            pSilion,
+                            &tag
+                        ) != 0U
+                    )
+                    {
+                        VCP_SendTag(&tag);
+                        return 1U;
+                    }
+                }
+                else
+                {
+                    /*
+                     * 0x0400 = no tag found.
+                     * Treat it as a retryable result for now.
+                     */
+                    if(
+                        SILION_GetStatus(pSilion)
+                        != SILION_STATUS_FAULT_NO_TAGS_FOUND
+                    )
+                    {
+                        /*
+                         * Other failures are also retried temporarily.
+                         */
+                    }
+                }
+
+                SILION_ClearFrame(pSilion);
+
+                if(attempt < 2U)
+                {
+                    SILION_Application_DelayMs(300U);
+                }
+            }
         }
 
-        return 0U;
-    }
+        VCP_SendString(
+            "NO_TAG\r\n"
+        );
 
-    /*
-     * Parse returned tag.
-     */
-    if(
-        SILION_ParseSingleTagInventory(
-            pSilion,
-            &tag
-        ) == 0U
-    )
-    {
-        return 0U;
-    }
+        SILION_ClearFrame(pSilion);
 
-    /*
-     * Use the same TAG format already used
-     * by asynchronous inventory.
-     */
-    VCP_SendTag(&tag);
-
-    return 1U;
+        return 1U;
 }
 
 /*
@@ -1417,6 +1591,7 @@ uint8_t SILION_Application_SynchronousInventory(
      * put a very large object on the STM32 stack.
      */
     static SILION_Tag_t tags[32];
+    uint8_t attempt;
 
     if(pSilion == NULL)
     {
@@ -1432,7 +1607,11 @@ uint8_t SILION_Application_SynchronousInventory(
         return 0U;
     }
 
-    /*
+    for(attempt = 0U; attempt < 3U; attempt++)
+    {
+
+
+    	/*
      * --------------------------------------------------------
      * 1. Start synchronous inventory - 0x22
      * --------------------------------------------------------
@@ -1449,6 +1628,14 @@ uint8_t SILION_Application_SynchronousInventory(
         ) == 0U
     )
     {
+        SILION_ClearFrame(pSilion);
+
+        if(attempt < 2U)
+        {
+            SILION_Application_DelayMs(100U);
+            continue;
+        }
+
         return 0U;
     }
 
@@ -1458,6 +1645,14 @@ uint8_t SILION_Application_SynchronousInventory(
         ) == 0U
     )
     {
+        SILION_ClearFrame(pSilion);
+
+        if(attempt < 2U)
+        {
+            SILION_Application_DelayMs(100U);
+            continue;
+        }
+
         return 0U;
     }
 
@@ -1586,6 +1781,9 @@ uint8_t SILION_Application_SynchronousInventory(
     (void)totalTags;
 
     return 1U;
+  }
+
+return 0U;
 }
 
 
@@ -1635,29 +1833,94 @@ uint8_t SILION_Application_StartInventory(void)
  * STOP INVENTORY
  * ------------------------------------------------------------
  */
-void SILION_Application_StopInventory(void)
+uint8_t SILION_Application_StopInventory(void)
 {
     if(appState != SILION_APP_INVENTORY)
     {
-        return;
+        return 0U;
     }
 
     /*
-     * Stop asynchronous inventory.
+     * --------------------------------------------------------
+     * Clear any stale RX data before sending STOP.
+     * --------------------------------------------------------
      */
-    SILION_StopAsyncInventory(pSilion);
+    SILION_ClearRxQueue();
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
 
     /*
-     * Make sure the STOP command has actually
-     * finished transmitting before allowing another
-     * host command to start.
+     * --------------------------------------------------------
+     * Send async STOP (0xAA49).
+     * --------------------------------------------------------
      */
-    SILION_WaitForTxComplete(100U);
+    if(SILION_StopAsyncInventory(pSilion) == 0U)
+    {
+        return 0U;
+    }
 
     /*
-     * Now it is safe to return to IDLE.
+     * --------------------------------------------------------
+     * Wait until the STOP frame has physically finished TX.
+     * --------------------------------------------------------
      */
+    if(SILION_WaitForTxComplete(100U) <= 0)
+    {
+        return 0U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * Now wait for the module's actual STOP response.
+     * The protocol is request/reply; TX complete alone
+     * does not mean the module has stopped.
+     * --------------------------------------------------------
+     */
+    if(SILION_WaitForResponse(1000U) != 1)
+    {
+        return 0U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * Verify that the response is the async command.
+     * --------------------------------------------------------
+     */
+    if(
+        SILION_GetCommand(pSilion)
+        != SILION_CMD_ASYNC_INVENTORY
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * Verify STOP succeeded.
+     * --------------------------------------------------------
+     */
+    if(
+        SILION_GetStatus(pSilion)
+        != SILION_STATUS_SUCCESS
+    )
+    {
+        return 0U;
+    }
+
+    /*
+     * --------------------------------------------------------
+     * STOP transaction is fully complete.
+     * Only now allow another command.
+     * --------------------------------------------------------
+     */
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
     appState = SILION_APP_IDLE;
+
+    return 1U;
 }
 
 
