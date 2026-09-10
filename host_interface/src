@@ -318,11 +318,21 @@ void HOST_Interface_Task(void)
              */
             else if(strcmp(hostRxBuffer, "STOP") == 0)
             {
-                SILION_Application_StopInventory();
-
-                VCP_SendString(
-                    "OK,STOP\r\n"
-                );
+            	if(
+            	    SILION_Application_StopInventory()
+            	    == 1U
+            	)
+            	{
+            	    VCP_SendString(
+            	        "OK,STOP\r\n"
+            	    );
+            	}
+            	else
+            	{
+            	    VCP_SendString(
+            	        "ERROR,STOP\r\n"
+            	    );
+            	}
             }
 
             /*
@@ -1036,6 +1046,104 @@ void HOST_Interface_Task(void)
                     );
                 }
             }
+
+            /*
+             * =================================================
+             * WRITE EPC
+             *
+             * Format:
+             *
+             *     WRITE_EPC,OLD_EPC,NEW_EPC
+             *
+             * Example:
+             *
+             *     WRITE_EPC,E2806894000050328410E5CD,E2000017221101441890A123
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "WRITE_EPC,",
+                    10U
+                ) == 0
+            )
+            {
+                char oldEpcText[63];
+                char newEpcText[63];
+
+                uint8_t oldEpc[31];
+                uint8_t newEpc[62];
+
+                uint8_t oldEpcLengthBytes;
+                uint8_t newEpcLengthBytes;
+
+                int parsed;
+
+                oldEpcText[0] = '\0';
+                newEpcText[0] = '\0';
+
+                parsed =
+                    sscanf(
+                        hostRxBuffer,
+                        "WRITE_EPC,%62[^,],%62s",
+                        oldEpcText,
+                        newEpcText
+                    );
+
+                if(parsed != 2)
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_EPC\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        oldEpcText,
+                        oldEpc,
+                        sizeof(oldEpc),
+                        &oldEpcLengthBytes
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_EPC\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        newEpcText,
+                        newEpc,
+                        sizeof(newEpc),
+                        &newEpcLengthBytes
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_EPC\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_WriteTagEPC(
+                        oldEpc,
+                        oldEpcLengthBytes,
+                        newEpc,
+                        newEpcLengthBytes
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,WRITE_EPC\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,WRITE_EPC\r\n"
+                    );
+                }
+            }
+
 
             /*
              * =================================================
