@@ -75,15 +75,31 @@ uint8_t SILION_Application_WriteTagData(
     uint8_t epcLengthBytes,
     uint8_t memBank,
     uint32_t address,
+    uint32_t accessPassword,
     const uint8_t *writeData,
     uint8_t writeDataLength
 );
+
 uint8_t SILION_Application_WriteTagEPC(
     const uint8_t *oldEpc,
     uint8_t oldEpcLengthBytes,
     const uint8_t *newEpc,
     uint8_t newEpcLengthBytes
 );
+uint8_t SILION_Application_LockTag(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint32_t accessPassword,
+    uint16_t maskBits,
+    uint16_t actionBits
+);
+
+uint8_t SILION_Application_KillTag(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint32_t killPassword
+);
+
 
 /*
  * ------------------------------------------------------------
