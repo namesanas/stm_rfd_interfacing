@@ -61,7 +61,7 @@ class Main(QMainWindow):
         br.addWidget(poll_label,2,0); br.addWidget(self.poll_timeout,2,1)
         c.addLayout(br); sl.addWidget(ctl)
 
-        cfg=self.card(); cf=QFormLayout(cfg); cf.addRow(self.sec("Reader Settings")); self.region=QLineEdit("FF"); self.region.setMaxLength(2); cf.addRow("Region (hex)",self.region)
+        cfg=self.card(); cf=QFormLayout(cfg); cf.addRow(self.sec("Reader Settings")); self.region=QLineEdit("01"); self.region.setMaxLength(2); cf.addRow("Region (hex)",self.region)
         self.tx=QSpinBox(); self.tx.setRange(1,255); self.tx.setValue(1); cf.addRow("TX antenna",self.tx); self.rx=QSpinBox(); self.rx.setRange(1,255); self.rx.setValue(1); cf.addRow("RX antenna",self.rx)
         self.power=QDoubleSpinBox(); self.power.setRange(0.0,33.0); self.power.setDecimals(2); self.power.setSingleStep(0.25); self.power.setValue(30.0); self.power.setSuffix(" dBm"); self.power.setToolTip("Transmit power in dBm. Firmware sends centi-dBm."); cf.addRow("Power",self.power); self.session=QSpinBox(); self.session.setRange(0,3); cf.addRow("Session",self.session)
         sg=QGridLayout()
@@ -119,7 +119,7 @@ class Main(QMainWindow):
         right=QSplitter(Qt.Vertical); inv=self.card(); iv=QVBoxLayout(inv); bar=QHBoxLayout(); cl=QPushButton("Clear"); cl.clicked.connect(self.clear_inv); ex=QPushButton("Export CSV"); ex.clicked.connect(self.export_csv); ri=QPushButton("Refresh Reader Info"); ri.clicked.connect(self.request_info); self.hint=QLabel("Waiting for TAG frames…"); self.hint.setObjectName("Sub"); [bar.addWidget(x) for x in (cl,ex,ri)]; bar.addStretch(); bar.addWidget(self.hint); iv.addLayout(bar)
         self.table=QTableWidget(0,6); self.table.setHorizontalHeaderLabels(["Time","EPC","RSSI (dBm)","Antenna","Frequency (kHz)","Reads"]); self.table.setAlternatingRowColors(True); self.table.setSelectionBehavior(QTableWidget.SelectRows); self.table.verticalHeader().setVisible(False); self.table.itemSelectionChanged.connect(self.use_selected_epc); h=self.table.horizontalHeader(); h.setSectionResizeMode(0,QHeaderView.ResizeToContents); h.setSectionResizeMode(1,QHeaderView.Stretch); [h.setSectionResizeMode(c,QHeaderView.ResizeToContents) for c in (2,3,4,5)]; iv.addWidget(self.table); right.addWidget(inv)
         tabs=QTabWidget(); self.event=QPlainTextEdit(); self.event.setReadOnly(True); tabs.addTab(self.event,"Event Log"); self.raw=QPlainTextEdit(); self.raw.setReadOnly(True); tabs.addTab(self.raw,"Raw Serial")
-        console=QWidget(); cv=QVBoxLayout(console); rr=QHBoxLayout(); self.command=QLineEdit(); self.command.setPlaceholderText("GET_POWER / SET_REGION,FF"); self.command.returnPressed.connect(self.manual); sb=QPushButton("Send"); sb.clicked.connect(self.manual); rr.addWidget(self.command); rr.addWidget(sb); cv.addLayout(rr); self.responses=QPlainTextEdit(); self.responses.setReadOnly(True); cv.addWidget(self.responses); tabs.addTab(console,"Command Console")
+        console=QWidget(); cv=QVBoxLayout(console); rr=QHBoxLayout(); self.command=QLineEdit(); self.command.setPlaceholderText("GET_POWER / SET_REGION,01"); self.command.returnPressed.connect(self.manual); sb=QPushButton("Send"); sb.clicked.connect(self.manual); rr.addWidget(self.command); rr.addWidget(sb); cv.addLayout(rr); self.responses=QPlainTextEdit(); self.responses.setReadOnly(True); cv.addWidget(self.responses); tabs.addTab(console,"Command Console")
         ab=QWidget(); al=QVBoxLayout(ab); x=QLabel("Reader information requests are serialized one-at-a-time. Single Poll performs a one-shot read using the existing START/STOP host protocol; Multi Poll keeps inventory running until stopped. Tag filtering is local to the GUI and does not change what the reader captures. Tag Write writes memory data using the current EPC as the selection filter. The STM32 firmware performs up to three write attempts per click. Serial RX is line-buffered so split USB packets are reconstructed before parsing."); x.setWordWrap(True); al.addWidget(x); al.addStretch(); tabs.addTab(ab,"About"); right.addWidget(tabs); right.setStretchFactor(0,3); right.setStretchFactor(1,2)
         split.addWidget(scroll); split.addWidget(right); split.setSizes([400,1050]); outer.addWidget(split,1); self.setCentralWidget(root); self.setStatusBar(QStatusBar())
 
@@ -135,9 +135,11 @@ class Main(QMainWindow):
             event.accept()
 
     def set_controls(self,on):
-        for w in (self.region,self.tx,self.rx,self.power,self.session,self.command,self.filter_edit,self.filter_exact_cb,self.poll_timeout,self.write_operation,self.target_epc,self.epc_edit_old,self.epc_edit_new,self.write_bank,self.write_address,self.write_data,self.use_selected,self.read_target_epc,self.read_bank,self.read_address,self.read_words,self.read_use_selected): w.setEnabled(on)
+        for w in (self.region,self.tx,self.rx,self.power,self.session,self.command,self.filter_edit,self.filter_exact_cb,self.poll_timeout,self.write_operation,self.target_epc,self.epc_edit_old,self.epc_edit_new,self.write_bank,self.write_address,self.write_data,self.write_access_password,self.use_selected,self.read_target_epc,self.read_bank,self.read_address,self.read_words,self.read_use_selected,self.lock_target_epc,self.lock_access_password,self.lock_mask,self.lock_action,self.lock_use_selected,self.kill_target_epc,self.kill_password,self.kill_use_selected): w.setEnabled(on)
         self.write_tag_btn.setEnabled(on and not self.inventory)
         self.read_tag_btn.setEnabled(on and not self.inventory)
+        self.lock_tag_btn.setEnabled(on and not self.inventory)
+        self.kill_tag_btn.setEnabled(on and not self.inventory)
         self.single.setEnabled(on and not self.inventory)
         self.multi.setEnabled(on and not self.inventory)
         self.stop.setEnabled(on and self.inventory)
@@ -237,12 +239,20 @@ class Main(QMainWindow):
             if data=='START':self.set_inventory(True)
             elif data=='STOP':self.set_inventory(False)
             elif data=='WRITE_TAG':
+                self.log('Tag memory write successful.')
                 self.statusBar().showMessage('Tag memory write successful.',5000)
             elif data=='WRITE_EPC':
-                self.statusBar().showMessage('Tag memory write successful.',5000)
+                self.log('EPC write successful.')
+                self.statusBar().showMessage('EPC write successful.',5000)
                 new_epc=self.epc_write_pending
                 self.epc_write_pending=''
                 self.refresh_after_epc_write(new_epc)
+            elif data=='LOCK_TAG':
+                self.log('Tag lock successful.')
+                self.statusBar().showMessage('Tag lock successful.',5000)
+            elif data=='KILL_TAG':
+                self.log('Tag kill successful.')
+                self.statusBar().showMessage('Tag kill successful.',5000)
         elif kind=='STATUS':
             v=data.get('_csv',[]); self.set_inventory(bool(v and v[0].upper()=='INVENTORY'))
         elif kind=='TEMP':
@@ -270,7 +280,15 @@ class Main(QMainWindow):
         elif kind=='ERROR':
             if data=='WRITE_EPC':
                 self.epc_write_pending=''
-            self.statusBar().showMessage("STM32: "+str(data),5000)
+            operation_messages={
+                'WRITE_TAG':'Tag memory write failed',
+                'WRITE_EPC':'EPC write failed',
+                'LOCK_TAG':'Tag lock failed',
+                'KILL_TAG':'Tag kill failed',
+            }
+            prefix=operation_messages.get(data,'STM32 error')
+            self.log(f'{prefix}: STM32 ERROR,{data}')
+            self.statusBar().showMessage(f'{prefix}: STM32 ERROR,{data}',5000)
     @staticmethod
     def apply(d,w,k):
         if k in d:
@@ -325,6 +343,8 @@ class Main(QMainWindow):
         self.resume.setEnabled(self.connected and not on)
         self.write_tag_btn.setEnabled(self.connected and not on)
         self.read_tag_btn.setEnabled(self.connected and not on)
+        self.lock_tag_btn.setEnabled(self.connected and not on)
+        self.kill_tag_btn.setEnabled(self.connected and not on)
         if not on:
             self.single_poll_started=False
             if hasattr(self, "single_poll_timer"):
@@ -398,15 +418,15 @@ class Main(QMainWindow):
                 self.target_epc.setText(epc)
                 self.epc_edit_old.setText(epc)
                 self.read_target_epc.setText(epc)
+                self.lock_target_epc.setText(epc)
+                self.kill_target_epc.setText(epc)
 
     def use_selected_read_epc(self):
         rows=self.table.selectionModel().selectedRows()
         if rows:
             item=self.table.item(rows[0].row(),1)
             if item:
-                self.selected_epc=item.text().strip().upper()
-                self.epc_edit_old.setText(self.selected_epc)
-                self.read_target_epc.setText(self.selected_epc)
+                self.use_selected_epc()
 
     @staticmethod
     def normalize_hex(text):
@@ -424,9 +444,17 @@ class Main(QMainWindow):
             return None
         return value.upper()
 
+    @staticmethod
+    def validate_fixed_hex(text, digits):
+        """Return an uppercase fixed-width hex value or None."""
+        value=text.strip()
+        if len(value)!=digits or any(c not in '0123456789abcdefABCDEF' for c in value):
+            return None
+        return value.upper()
+
     def update_write_mode(self, *_):
         epc_editing=self.write_operation.currentData()=='EPC_EDIT'
-        for widget in (self.write_target_label,self.target_epc,self.write_bank_label,self.write_bank,self.write_address_label,self.write_address,self.write_data_label,self.write_data):
+        for widget in (self.write_target_label,self.target_epc,self.write_bank_label,self.write_bank,self.write_address_label,self.write_address,self.write_data_label,self.write_data,self.write_access_password_label,self.write_access_password):
             widget.setVisible(not epc_editing)
         for widget in (self.epc_edit_old_label,self.epc_edit_old,self.epc_edit_new_label,self.epc_edit_new):
             widget.setVisible(epc_editing)
@@ -472,6 +500,8 @@ class Main(QMainWindow):
         self.epc_edit_old.setText(new_epc)
         self.target_epc.setText(new_epc)
         self.read_target_epc.setText(new_epc)
+        self.lock_target_epc.setText(new_epc)
+        self.kill_target_epc.setText(new_epc)
         self.clear_inv()
 
     def read_tag(self):
@@ -504,6 +534,7 @@ class Main(QMainWindow):
             self.statusBar().showMessage("Stop inventory before writing a tag.",4000); return
 
         target=self.normalize_hex(self.target_epc.text())
+        access_password=self.validate_fixed_hex(self.write_access_password.text(),8)
         data=self.normalize_hex(self.write_data.text())
 
         if not target:
@@ -513,6 +544,9 @@ class Main(QMainWindow):
         try:int(target,16)
         except ValueError:
             QMessageBox.warning(self,"Invalid target EPC","EPC must contain hexadecimal digits only."); return
+
+        if not access_password:
+            QMessageBox.warning(self,"Invalid access password","Access Password must be exactly 8 hexadecimal characters (a 32-bit value)."); return
 
         if not data:
             QMessageBox.warning(self,"No write data","Enter hexadecimal data to write."); return
@@ -536,59 +570,48 @@ class Main(QMainWindow):
 
         self.selected_epc=target
         self.target_epc.setText(target)
-        self.enqueue(f"WRITE_TAG,{target},{bank},{address},{data}")
+        self.enqueue(f"WRITE_TAG,{target},{bank},{address},{access_password},{data}")
 
-    def find_row(self,epc):
-        for r in range(self.table.rowCount()):
-            if self.table.item(r,1) and self.table.item(r,1).text()==epc:return r
-        return None
-    def clear_inv(self):
-        self.table.setRowCount(0)
-        self.epcs={}
-        self.total=0
-        self.first_tag=None
-        self.kv[2].setText('0')
-        self.kv[3].setText('0')
-        self.kv[4].setText('0.0/s')
-        self.hint.setText('Waiting for TAG frames…')
-    def export_csv(self):
-        p,_=QFileDialog.getSaveFileName(self,'Export RFID Inventory','rfid_inventory.csv','CSV (*.csv)');
-        if not p:return
-        with open(p,'w',newline='',encoding='utf-8') as f:
-            w=csv.writer(f);w.writerow(['Time','EPC','RSSI (dBm)','Antenna','Frequency (kHz)','Reads'])
-            for r in range(self.table.rowCount()):w.writerow([self.table.item(r,c).text() if self.table.item(r,c) else '' for c in range(6)])
-    def set_region(self):
-        try:self.enqueue(f"SET_REGION,{int(self.region.text().replace('0x','').replace('0X',''),16):02X}")
-        except:QMessageBox.warning(self,'Invalid Region','Enter a hex byte such as FF.')
-    def manual(self):
-        c=self.command.text().strip();
-        if c:self.enqueue(c);self.command.clear()
+    def lock_tag(self):
+        if not self.connected:
+            self.statusBar().showMessage("Connect to STM32 first.",3000); return
+        if self.inventory:
+            self.statusBar().showMessage("Stop inventory before locking a tag.",4000); return
 
-    def log(self,msg):self.event.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}")
-    def on_error(self,msg):self.log('ERROR: '+msg);self.statusBar().showMessage(msg,5000)
-    def restore(self):
-        i=self.baud.findData(self.settings.value('baud',115200,type=int));
-        if i>=0:self.baud.setCurrentIndex(i)
-        for k,w in [('region',self.region),('tx',self.tx),('rx',self.rx),('session',self.session)]:
-            v=self.settings.value(k)
-            if v is not None:
-                try:w.setText(str(v)) if isinstance(w,QLineEdit) else w.setValue(int(v))
-                except:pass
-        saved_power=self.settings.value('power')
-        if saved_power is not None:
-            try:
-                power_value=float(saved_power)
-                if power_value > 33.0:
-                    power_value /= 100.0
-                self.power.setValue(power_value)
-            except:pass
-        self.dedupe.setChecked(True);self.read_bank.setCurrentIndex(max(0,self.read_bank.findData(self.settings.value('read_bank',2,type=int))));self.read_address.setValue(self.settings.value('read_address',0,type=int));self.read_words.setValue(self.settings.value('read_words',2,type=int));self.auto.setChecked(self.settings.value('auto',True,type=bool));self.clear_start.setChecked(self.settings.value('clear_start',False,type=bool));self.reconnect.setChecked(self.settings.value('reconnect',True,type=bool));self.filter_edit.setText(self.settings.value('filter','',type=str));self.filter_exact_cb.setChecked(self.settings.value('filter_exact',False,type=bool));self.poll_timeout.setValue(self.settings.value('poll_timeout',3.0,type=float))
-    def save(self):
-        self.settings.setValue('dark',self.dark);self.settings.setValue('port',self.port.currentData() or '');self.settings.setValue('baud',self.baud.currentData())
-        for k,w in [('region',self.region),('tx',self.tx),('rx',self.rx),('power',self.power),('session',self.session)]:self.settings.setValue(k,w.text() if isinstance(w,QLineEdit) else w.value())
-        self.settings.setValue('dedupe',True);self.settings.setValue('read_bank',self.read_bank.currentData());self.settings.setValue('read_address',self.read_address.value());self.settings.setValue('read_words',self.read_words.value());self.settings.setValue('auto',self.auto.isChecked());self.settings.setValue('clear_start',self.clear_start.isChecked());self.settings.setValue('reconnect',self.reconnect.isChecked());self.settings.setValue('filter',self.filter_edit.text());self.settings.setValue('filter_exact',self.filter_exact_cb.isChecked());self.settings.setValue('poll_timeout',self.poll_timeout.value())
-    def apply_theme(self):QApplication.instance().setStyleSheet(theme.DARK if self.dark else theme.LIGHT);self.theme_btn.setText('Bright' if self.dark else 'Dark');self.save()
-    def set_theme(self,d):self.dark=d;self.apply_theme();self.log('Theme changed to '+('Dark' if d else 'Bright'))
-    def closeEvent(self,e):self.save();self.io.close();e.accept()
+        target=self.validate_epc_value(self.normalize_hex(self.lock_target_epc.text()))
+        access_password=self.validate_fixed_hex(self.lock_access_password.text(),8)
+        mask=self.validate_fixed_hex(self.lock_mask.text(),4)
+        action=self.validate_fixed_hex(self.lock_action.text(),4)
+        if not target:
+            QMessageBox.warning(self,"Invalid target EPC","EPC must contain hexadecimal digits only, have an even number of digits, and be 2 to 62 bytes long."); return
+        if not access_password:
+            QMessageBox.warning(self,"Invalid access password","Access Password must be exactly 8 hexadecimal characters (a 32-bit value)."); return
+        if not mask:
+            QMessageBox.warning(self,"Invalid lock mask","Lock Mask must be exactly 4 hexadecimal characters."); return
+        if not action:
+            QMessageBox.warning(self,"Invalid lock action","Lock Action must be exactly 4 hexadecimal characters."); return
 
-app=QApplication(sys.argv);app.setStyle('Fusion');w=Main();w.show();sys.exit(app.exec())
+        answer=QMessageBox.question(
+            self,
+            "Confirm tag lock",
+            f"Send the protocol-level lock command?\n\nTarget EPC: {target}\nLock Mask: {mask}\nLock Action: {action}",
+            QMessageBox.Yes|QMessageBox.No,
+            QMessageBox.No
+        )
+        if answer!=QMessageBox.Yes: return
+        self.selected_epc=target
+        self.lock_target_epc.setText(target)
+        self.enqueue(f"LOCK_TAG,{target},{access_password},{mask},{action}")
+
+    def kill_tag(self):
+        if not self.connected:
+            self.statusBar().showMessage("Connect to STM32 first.",3000); return
+        if self.inventory:
+            self.statusBar().showMessage("Stop inventory before killing a tag.",4000); return
+
+        target=self.validate_epc_value(self.normalize_hex(self.kill_target_epc.text()))
+        kill_password=self.validate_fixed_hex(self.kill_password.text(),8)
+        if not target:
+            QMessageBox.warning(self,"Invalid target EPC","EPC must contain hexadecimal digits only, have an even number of digits, and be 2 to 62 bytes long."); return
+        if not kill_password:
+            QMessageBox.warning(self,"Invalid kill password","Kill Password must be exactly 8 hexa
