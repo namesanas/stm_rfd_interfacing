@@ -1144,20 +1144,190 @@ void HOST_Interface_Task(void)
                 }
             }
 
-
             /*
              * =================================================
-             * WRITE TAG DATA
+             * LOCK TAG
              *
              * Format:
              *
-             * WRITE_TAG,EPC,BANK,ADDRESS,HEX_DATA
+             * LOCK_TAG,EPC,ACCESS_PASSWORD,MASK_BITS,ACTION_BITS
              *
              * Example:
              *
-             * WRITE_TAG,E2806894000050328410E5CD,3,2,11223344
+             * LOCK_TAG,E2806894000050328410E5CD,00000000,0001,0001
              *
              * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "LOCK_TAG,",
+                    9U
+                ) == 0
+            )
+            {
+                char epcText[63];
+
+                uint8_t epc[62];
+                uint8_t epcLengthBytes;
+
+                unsigned long accessPassword;
+                unsigned int maskBits;
+                unsigned int actionBits;
+
+                int parsed;
+
+                epcText[0] = '\0';
+
+                parsed =
+                    sscanf(
+                        hostRxBuffer,
+                        "LOCK_TAG,%62[^,],%lx,%x,%x",
+                        epcText,
+                        &accessPassword,
+                        &maskBits,
+                        &actionBits
+                    );
+
+                if(
+                    parsed != 4 ||
+                    accessPassword > 0xFFFFFFFFUL ||
+                    maskBits > 0x03FFU ||
+                    actionBits > 0x03FFU
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,LOCK_TAG\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        epcText,
+                        epc,
+                        sizeof(epc),
+                        &epcLengthBytes
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,LOCK_TAG\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_LockTag(
+                        epc,
+                        epcLengthBytes,
+                        (uint32_t)accessPassword,
+                        (uint16_t)maskBits,
+                        (uint16_t)actionBits
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,LOCK_TAG\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,LOCK_TAG\r\n"
+                    );
+                }
+            }
+
+            /*
+             * =================================================
+             * KILL TAG
+             *
+             * Format:
+             *
+             * KILL_TAG,EPC,KILL_PASSWORD
+             *
+             * Example:
+             *
+             * KILL_TAG,E2806894000050328410E5CD,00000000
+             *
+             * =================================================
+             */
+            else if(
+                strncmp(
+                    hostRxBuffer,
+                    "KILL_TAG,",
+                    9U
+                ) == 0
+            )
+            {
+                char epcText[63];
+
+                uint8_t epc[62];
+                uint8_t epcLengthBytes;
+
+                unsigned long killPassword;
+
+                int parsed;
+
+                epcText[0] = '\0';
+
+                parsed =
+                    sscanf(
+                        hostRxBuffer,
+                        "KILL_TAG,%62[^,],%lx",
+                        epcText,
+                        &killPassword
+                    );
+
+                if(
+                    parsed != 2 ||
+                    killPassword > 0xFFFFFFFFUL
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,KILL_TAG\r\n"
+                    );
+                }
+                else if(
+                    HOST_ParseHexBytes(
+                        epcText,
+                        epc,
+                        sizeof(epc),
+                        &epcLengthBytes
+                    ) == 0U
+                )
+                {
+                    VCP_SendString(
+                        "ERROR,KILL_TAG\r\n"
+                    );
+                }
+                else if(
+                    SILION_Application_KillTag(
+                        epc,
+                        epcLengthBytes,
+                        (uint32_t)killPassword
+                    ) == 1U
+                )
+                {
+                    VCP_SendString(
+                        "OK,KILL_TAG\r\n"
+                    );
+                }
+                else
+                {
+                    VCP_SendString(
+                        "ERROR,KILL_TAG\r\n"
+                    );
+                }
+            }
+
+
+
+            /*
+             * Format:
+             *
+             * WRITE_TAG,EPC,BANK,ADDRESS,ACCESS_PASSWORD,HEX_DATA
+             *
+             * Example: now write
+             *
+             * WRITE_TAG,E2806894000050328410E5CD,3,2,00000000,11223344
              */
             else if(
                 strncmp(
@@ -1167,19 +1337,20 @@ void HOST_Interface_Task(void)
                 ) == 0
             )
             {
-                char epcText[63];
-                char dataText[65];
+            	char epcText[63];
+            	char dataText[65];
 
-                uint8_t epc[62];
-                uint8_t writeData[64];
+            	uint8_t epc[62];
+            	uint8_t writeData[64];
 
-                uint8_t epcLengthBytes;
-                uint8_t writeDataLength;
+            	uint8_t epcLengthBytes;
+            	uint8_t writeDataLength;
 
-                unsigned int bankTemp;
-                unsigned long addressTemp;
+            	unsigned int bankTemp;
+            	unsigned long addressTemp;
+            	unsigned long accessPasswordTemp;
 
-                int parsed;
+            	int parsed;
 
                 epcText[0] = '\0';
                 dataText[0] = '\0';
@@ -1187,17 +1358,19 @@ void HOST_Interface_Task(void)
                 parsed =
                     sscanf(
                         hostRxBuffer,
-                        "WRITE_TAG,%62[^,],%u,%lu,%64s",
+						"WRITE_TAG,%62[^,],%u,%lu,%8lx,%64s",
                         epcText,
                         &bankTemp,
                         &addressTemp,
+						&accessPasswordTemp,
                         dataText
                     );
 
                 if(
-                    parsed != 4 ||
+                    parsed != 5 ||
                     bankTemp > 3U ||
-                    addressTemp > 0xFFFFFFFFUL
+                    addressTemp > 0xFFFFFFFFUL ||
+                    accessPasswordTemp > 0xFFFFFFFFUL
                 )
                 {
                     VCP_SendString(
@@ -1231,14 +1404,14 @@ void HOST_Interface_Task(void)
                     );
                 }
                 else if(
-                    SILION_Application_WriteTagData(
-                        epc,
-                        epcLengthBytes,
-                        (uint8_t)bankTemp,
-                        (uint32_t)addressTemp,
-                        writeData,
-                        writeDataLength
-                    ) == 1U
+				SILION_Application_WriteTagData(
+					epc,
+					epcLengthBytes,
+					(uint8_t)bankTemp,
+					(uint32_t)addressTemp,
+					(uint32_t)accessPasswordTemp,
+					writeData,
+					writeDataLength) == 1U
                 )
                 {
                     VCP_SendString(
