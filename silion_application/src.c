@@ -1174,9 +1174,11 @@ uint8_t SILION_Application_WriteTagData(
     uint8_t epcLengthBytes,
     uint8_t memBank,
     uint32_t address,
+    uint32_t accessPassword,
     const uint8_t *writeData,
     uint8_t writeDataLength
 )
+
 {
     if(pSilion == NULL)
         return 0U;
@@ -1206,14 +1208,16 @@ uint8_t SILION_Application_WriteTagData(
 
     if(
         SILION_WriteTagDataByEPC(
-            pSilion,
-            5000U,
-            memBank,
-            address,
-            writeData,
-            writeDataLength,
-            epc,
-            epcLengthBytes
+        		pSilion,
+        		5000U,
+        		memBank,
+        		address,
+        		accessPassword,
+        		writeData,
+        		writeDataLength,
+        		epc,
+        		epcLengthBytes
+
         ) == 0U
     )
     {
@@ -1244,14 +1248,16 @@ uint8_t SILION_Application_WriteTagData(
                 txComplete = 0U;
 
                 if(SILION_WriteTagDataByEPC(
-                        pSilion,
-                        5000U,
-                        memBank,
-                        address,
-                        writeData,
-                        writeDataLength,
-                        epc,
-                        epcLengthBytes) == 0U)
+                		pSilion,
+                		5000U,
+                		memBank,
+                		address,
+                		accessPassword,
+                		writeData,
+                		writeDataLength,
+                		epc,
+                		epcLengthBytes
+) == 0U)
                 {
                     return 0U;
                 }
@@ -1334,6 +1340,143 @@ uint8_t SILION_Application_WriteTagEPC(
 
     return 1U;
 }
+
+/*
+ * ------------------------------------------------------------
+ * LOCK TAG
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_LockTag(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint32_t accessPassword,
+    uint16_t maskBits,
+    uint16_t actionBits
+)
+{
+    if(pSilion == NULL)
+        return 0U;
+
+    if(appState != SILION_APP_IDLE)
+        return 0U;
+
+    if(epc == NULL)
+        return 0U;
+
+    if(epcLengthBytes == 0U ||
+       epcLengthBytes > 31U ||
+       (epcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    /*
+     * Only the lower 10 bits are defined by Gen2.
+     */
+    if(
+        (maskBits & 0xFC00U) != 0U ||
+        (actionBits & 0xFC00U) != 0U
+    )
+    {
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_LockTag(
+            pSilion,
+            5000U,
+            accessPassword,
+            maskBits,
+            actionBits,
+            epc,
+            epcLengthBytes
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_LOCK_TAG
+        ) == 0U
+    )
+    {
+        SILION_ClearFrame(pSilion);
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+
+    return 1U;
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * KILL TAG
+ * ------------------------------------------------------------
+ */
+uint8_t SILION_Application_KillTag(
+    const uint8_t *epc,
+    uint8_t epcLengthBytes,
+    uint32_t killPassword
+)
+{
+    if(pSilion == NULL)
+        return 0U;
+
+    if(appState != SILION_APP_IDLE)
+        return 0U;
+
+    if(epc == NULL)
+        return 0U;
+
+    if(epcLengthBytes == 0U ||
+       epcLengthBytes > 31U ||
+       (epcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+    SILION_ClearUartFlags();
+
+    txComplete = 0U;
+
+    if(
+        SILION_KillTag(
+            pSilion,
+            5000U,
+            killPassword,
+            epc,
+            epcLengthBytes
+        ) == 0U
+    )
+    {
+        return 0U;
+    }
+
+    if(
+        SILION_Application_Transaction(
+            SILION_CMD_KILL_TAG
+        ) == 0U
+    )
+    {
+        SILION_ClearFrame(pSilion);
+        return 0U;
+    }
+
+    SILION_ClearFrame(pSilion);
+
+    return 1U;
+}
+
 
 /*
  * ------------------------------------------------------------
