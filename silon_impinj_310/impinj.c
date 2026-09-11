@@ -8,9 +8,6 @@
 
 #include "impinj.h"
 #include <stddef.h>
-#include <stdio.h>
-
-extern void VCP_SendString(const char *text);
 
 
 /*
@@ -1597,38 +1594,7 @@ uint8_t SILION_ReadTagDataByEPC(
             frame
         );
 
-    /*
-     * ----------------------------------------------------------
-     * Debug - complete TX frame
-     * ----------------------------------------------------------
-     */
-    {
-        char debug[256];
-        int pos = 0;
-        uint16_t j;
 
-        pos += sprintf(
-            debug + pos,
-            "DEBUG,READ_TX="
-        );
-
-        for(j = 0U; j < frameLength; j++)
-        {
-            pos += sprintf(
-                debug + pos,
-                "%02X%s",
-                frame[j],
-                (j + 1U < frameLength) ? " " : ""
-            );
-        }
-
-        pos += sprintf(
-            debug + pos,
-            "\r\n"
-        );
-
-        VCP_SendString(debug);
-    }
 
     /*
      * ----------------------------------------------------------
@@ -1651,6 +1617,7 @@ uint8_t SILION_WriteTagDataByEPC(
         uint16_t timeoutMs,
         uint8_t memBank,
         uint32_t address,
+        uint32_t accessPassword,
         const uint8_t *writeData,
         uint8_t writeDataLength,
         const uint8_t *epc,
@@ -1671,8 +1638,9 @@ uint8_t SILION_WriteTagDataByEPC(
      * Write Data    N
      */
 
-    static uint8_t data[100];
-    static uint8_t frame[110];
+	static uint8_t data[140];
+	static uint8_t frame[145];
+
 
     uint16_t index = 0U;
     uint16_t frameLength;
@@ -1694,7 +1662,9 @@ uint8_t SILION_WriteTagDataByEPC(
         return 0U;
     }
 
-    if(epcLengthBytes == 0U || epcLengthBytes > 62U)
+    if(epcLengthBytes == 0U ||
+       epcLengthBytes > 62U ||
+       (epcLengthBytes & 0x01U) != 0U)
     {
         return 0U;
     }
@@ -1722,9 +1692,9 @@ uint8_t SILION_WriteTagDataByEPC(
     data[index++] = (uint8_t)(timeoutMs & 0xFFU);
 
     /*
-     * No filter.
+     * EPC-value filter.
      */
-    data[index++] = 0x00U;
+    data[index++] = 0x01U;
 
     /*
      * Write address.
@@ -1740,12 +1710,36 @@ uint8_t SILION_WriteTagDataByEPC(
     data[index++] = memBank;
 
     /*
+     * Access password.
+     */
+    data[index++] = (uint8_t)(accessPassword >> 24);
+    data[index++] = (uint8_t)(accessPassword >> 16);
+    data[index++] = (uint8_t)(accessPassword >> 8);
+    data[index++] = (uint8_t)accessPassword;
+
+
+
+    /*
+     * EPC length in bits.
+     */
+    data[index++] = (uint8_t)(epcLengthBytes * 8U);
+
+    /*
+     * EPC.
+     */
+    for(i = 0U; i < epcLengthBytes; i++)
+    {
+        data[index++] = epc[i];
+    }
+
+    /*
      * Write data.
      */
     for(i = 0U; i < writeDataLength; i++)
     {
         data[index++] = writeData[i];
     }
+
 
 
     /*
@@ -1761,38 +1755,6 @@ uint8_t SILION_WriteTagDataByEPC(
             frame
         );
 
-    /*
-     * ----------------------------------------------------------
-     * Debug - complete TX frame
-     * ----------------------------------------------------------
-     */
-    {
-        char debug[256];
-        int pos = 0;
-        uint16_t j;
-
-        pos += sprintf(
-            debug + pos,
-            "DEBUG,WRITE_TX="
-        );
-
-        for(j = 0U; j < frameLength; j++)
-        {
-            pos += sprintf(
-                debug + pos,
-                "%02X%s",
-                frame[j],
-                (j + 1U < frameLength) ? " " : ""
-            );
-        }
-
-        pos += sprintf(
-            debug + pos,
-            "\r\n"
-        );
-
-        VCP_SendString(debug);
-    }
 
     /*
      * ----------------------------------------------------------
@@ -1911,36 +1873,6 @@ uint8_t SILION_WriteTagEPC(
             frame
         );
 
-    /*
-     * Debug - complete TX frame.
-     */
-    {
-        char debug[300];
-        int pos = 0;
-        uint16_t j;
-
-        pos += sprintf(
-            debug + pos,
-            "DEBUG,WRITE_EPC_TX="
-        );
-
-        for(j = 0U; j < frameLength; j++)
-        {
-            pos += sprintf(
-                debug + pos,
-                "%02X%s",
-                frame[j],
-                (j + 1U < frameLength) ? " " : ""
-            );
-        }
-
-        pos += sprintf(
-            debug + pos,
-            "\r\n"
-        );
-
-        VCP_SendString(debug);
-    }
 
     return SILION_SendFrame(
         pSilionHandle,
@@ -1948,6 +1880,191 @@ uint8_t SILION_WriteTagEPC(
         frameLength
     );
 }
+
+uint8_t SILION_KillTag(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint32_t killPassword,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes)
+{
+    static uint8_t data[80];
+    static uint8_t frame[90];
+
+    uint16_t index = 0U;
+    uint16_t frameLength;
+    uint8_t i;
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(epc == NULL)
+    {
+        return 0U;
+    }
+
+    if(epcLengthBytes == 0U ||
+       epcLengthBytes > 31U ||
+       (epcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    /*
+     * Timeout
+     */
+    data[index++] = (uint8_t)(timeoutMs >> 8);
+    data[index++] = (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * Option = 0x01
+     * Select tag by EPC.
+     */
+    data[index++] = 0x01U;
+
+    /*
+     * Kill password
+     */
+    data[index++] = (uint8_t)(killPassword >> 24);
+    data[index++] = (uint8_t)(killPassword >> 16);
+    data[index++] = (uint8_t)(killPassword >> 8);
+    data[index++] = (uint8_t)killPassword;
+
+    /*
+     * RFU
+     */
+    data[index++] = 0x00U;
+
+    /*
+     * EPC select length in bits
+     */
+    data[index++] = (uint8_t)(epcLengthBytes * 8U);
+
+    /*
+     * EPC select data
+     */
+    for(i = 0U; i < epcLengthBytes; i++)
+    {
+        data[index++] = epc[i];
+    }
+
+    /*
+     * Build command 0x26.
+     */
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_KILL_TAG,
+            data,
+            (uint8_t)index,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+uint8_t SILION_LockTag(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint32_t accessPassword,
+        uint16_t maskBits,
+        uint16_t actionBits,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes)
+{
+    static uint8_t data[80];
+    static uint8_t frame[90];
+
+    uint16_t index = 0U;
+    uint16_t frameLength;
+    uint8_t i;
+
+    if(pSilionHandle == NULL)
+    {
+        return 0U;
+    }
+
+    if(epc == NULL)
+    {
+        return 0U;
+    }
+
+    if(epcLengthBytes == 0U ||
+       epcLengthBytes > 31U ||
+       (epcLengthBytes & 0x01U) != 0U)
+    {
+        return 0U;
+    }
+
+    /*
+     * Timeout
+     */
+    data[index++] = (uint8_t)(timeoutMs >> 8);
+    data[index++] = (uint8_t)(timeoutMs & 0xFFU);
+
+    /*
+     * Option = 0x01
+     * Select tag by EPC.
+     */
+    data[index++] = 0x01U;
+
+    /*
+     * Access password
+     */
+    data[index++] = (uint8_t)(accessPassword >> 24);
+    data[index++] = (uint8_t)(accessPassword >> 16);
+    data[index++] = (uint8_t)(accessPassword >> 8);
+    data[index++] = (uint8_t)accessPassword;
+
+    /*
+     * Mask bits
+     */
+    data[index++] = (uint8_t)(maskBits >> 8);
+    data[index++] = (uint8_t)(maskBits & 0xFFU);
+
+    /*
+     * Action bits
+     */
+    data[index++] = (uint8_t)(actionBits >> 8);
+    data[index++] = (uint8_t)(actionBits & 0xFFU);
+
+    /*
+     * EPC select length in bits
+     */
+    data[index++] = (uint8_t)(epcLengthBytes * 8U);
+
+    /*
+     * EPC select data
+     */
+    for(i = 0U; i < epcLengthBytes; i++)
+    {
+        data[index++] = epc[i];
+    }
+
+    /*
+     * Build command 0x25.
+     */
+    frameLength =
+        SILION_BuildCommandFrame(
+            SILION_CMD_LOCK_TAG,
+            data,
+            (uint8_t)index,
+            frame
+        );
+
+    return SILION_SendFrame(
+        pSilionHandle,
+        frame,
+        frameLength
+    );
+}
+
+
 
 
 uint8_t SILION_ParseReadTagData(
@@ -3315,43 +3432,6 @@ void SILION_ProcessByte(
             {
 
 
-
-            	/*
-            	 * --------------------------------------------------------
-            	 * DEBUG: print the complete validated RX frame
-            	 * --------------------------------------------------------
-            	 */
-            	{
-            	    char debug[512];
-            	    int pos = 0;
-            	    uint16_t i;
-
-            	    pos += sprintf(
-            	        debug + pos,
-            	        "DEBUG,RX_RAW,LEN=%u,RXINDEX=%u,FRAME=",
-            	        pSilionHandle->expectedLength,
-            	        pSilionHandle->rxIndex
-            	    );
-
-            	    for(i = 0U; i < pSilionHandle->rxIndex; i++)
-            	    {
-            	        pos += sprintf(
-            	            debug + pos,
-            	            "%02X%s",
-            	            pSilionHandle->rxBuffer[i],
-            	            (i + 1U < pSilionHandle->rxIndex) ? " " : ""
-            	        );
-            	    }
-
-            	    pos += sprintf(
-            	        debug + pos,
-            	        ",CMD=%02X,STATUS=%04X\r\n",
-            	        pSilionHandle->command,
-            	        pSilionHandle->status
-            	    );
-
-            	    VCP_SendString(debug);
-            	}
 
                 /*
                  * --------------------------------------------------------
