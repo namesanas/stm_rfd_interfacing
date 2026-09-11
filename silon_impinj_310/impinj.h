@@ -70,6 +70,9 @@
 #define SILION_CMD_READ_TAG_DATA      0x28U
 #define SILION_CMD_WRITE_TAG_DATA     0x24U
 #define SILION_CMD_WRITE_TAG_EPC      0x23U
+#define SILION_CMD_LOCK_TAG           0x25U
+#define SILION_CMD_KILL_TAG           0x26U
+
 
 #define SILION_CMD_ASYNC_INVENTORY   0xAAU
 #define SILION_ASYNC_START           0x48U
@@ -454,11 +457,12 @@ uint8_t SILION_WriteTagDataByEPC(
         uint16_t timeoutMs,
         uint8_t memBank,
         uint32_t address,
+        uint32_t accessPassword,
         const uint8_t *writeData,
         uint8_t writeDataLength,
         const uint8_t *epc,
-        uint8_t epcLengthBytes
-);
+        uint8_t epcLengthBytes);
+
 uint8_t SILION_WriteTagEPC(
         Silion_Handle_t *pSilionHandle,
         uint16_t timeoutMs,
@@ -467,6 +471,20 @@ uint8_t SILION_WriteTagEPC(
         const uint8_t *newEpc,
         uint8_t newEpcLengthBytes
 );
+uint8_t SILION_KillTag(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint32_t killPassword,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes);
+uint8_t SILION_LockTag(
+        Silion_Handle_t *pSilionHandle,
+        uint16_t timeoutMs,
+        uint32_t accessPassword,
+        uint16_t maskBits,
+        uint16_t actionBits,
+        const uint8_t *epc,
+        uint8_t epcLengthBytes);
 
 
 uint8_t SILION_ParseReadTagData(
