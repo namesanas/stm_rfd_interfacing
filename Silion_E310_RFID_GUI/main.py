@@ -614,4 +614,82 @@ class Main(QMainWindow):
         if not target:
             QMessageBox.warning(self,"Invalid target EPC","EPC must contain hexadecimal digits only, have an even number of digits, and be 2 to 62 bytes long."); return
         if not kill_password:
-            QMessageBox.warning(self,"Invalid kill password","Kill Password must be exactly 8 hexa
+            QMessageBox.warning(self,"Invalid kill password","Kill Password must be exactly 8 hexadecimal characters (a 32-bit value)."); return
+
+        answer=QMessageBox.warning(
+            self,
+            "IRREVERSIBLE TAG KILL",
+            f"This operation is destructive and irreversible on a properly configured tag.\n\n"
+            f"Target EPC: {target}\n\nAre you sure you want to send the KILL command?",
+            QMessageBox.Yes|QMessageBox.No,
+            QMessageBox.No
+        )
+        if answer!=QMessageBox.Yes: return
+        self.selected_epc=target
+        self.kill_target_epc.setText(target)
+        self.enqueue(f"KILL_TAG,{target},{kill_password}")
+
+    def clear_lock_fields(self):
+        self.lock_target_epc.clear()
+        self.lock_access_password.setText('00000000')
+        self.lock_mask.setText('0000')
+        self.lock_action.setText('0000')
+
+    def clear_kill_fields(self):
+        self.kill_target_epc.clear()
+        self.kill_password.setText('00000000')
+
+    def find_row(self,epc):
+        for r in range(self.table.rowCount()):
+            if self.table.item(r,1) and self.table.item(r,1).text()==epc:return r
+        return None
+    def clear_inv(self):
+        self.table.setRowCount(0)
+        self.epcs={}
+        self.total=0
+        self.first_tag=None
+        self.kv[2].setText('0')
+        self.kv[3].setText('0')
+        self.kv[4].setText('0.0/s')
+        self.hint.setText('Waiting for TAG frames…')
+    def export_csv(self):
+        p,_=QFileDialog.getSaveFileName(self,'Export RFID Inventory','rfid_inventory.csv','CSV (*.csv)');
+        if not p:return
+        with open(p,'w',newline='',encoding='utf-8') as f:
+            w=csv.writer(f);w.writerow(['Time','EPC','RSSI (dBm)','Antenna','Frequency (kHz)','Reads'])
+            for r in range(self.table.rowCount()):w.writerow([self.table.item(r,c).text() if self.table.item(r,c) else '' for c in range(6)])
+    def set_region(self):
+        try:self.enqueue(f"SET_REGION,{int(self.region.text().replace('0x','').replace('0X',''),16):02X}")
+        except:QMessageBox.warning(self,'Invalid Region','Enter a hex byte such as 01.')
+    def manual(self):
+        c=self.command.text().strip();
+        if c:self.enqueue(c);self.command.clear()
+
+    def log(self,msg):self.event.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}")
+    def on_error(self,msg):self.log('ERROR: '+msg);self.statusBar().showMessage(msg,5000)
+    def restore(self):
+        i=self.baud.findData(self.settings.value('baud',115200,type=int));
+        if i>=0:self.baud.setCurrentIndex(i)
+        for k,w in [('region',self.region),('tx',self.tx),('rx',self.rx),('session',self.session)]:
+            v=self.settings.value(k)
+            if v is not None:
+                try:w.setText(str(v)) if isinstance(w,QLineEdit) else w.setValue(int(v))
+                except:pass
+        saved_power=self.settings.value('power')
+        if saved_power is not None:
+            try:
+                power_value=float(saved_power)
+                if power_value > 33.0:
+                    power_value /= 100.0
+                self.power.setValue(power_value)
+            except:pass
+        self.dedupe.setChecked(True);self.read_bank.setCurrentIndex(max(0,self.read_bank.findData(self.settings.value('read_bank',2,type=int))));self.read_address.setValue(self.settings.value('read_address',0,type=int));self.read_words.setValue(self.settings.value('read_words',2,type=int));self.auto.setChecked(self.settings.value('auto',True,type=bool));self.clear_start.setChecked(self.settings.value('clear_start',False,type=bool));self.reconnect.setChecked(self.settings.value('reconnect',True,type=bool));self.filter_edit.setText(self.settings.value('filter','',type=str));self.filter_exact_cb.setChecked(self.settings.value('filter_exact',False,type=bool));self.poll_timeout.setValue(self.settings.value('poll_timeout',3.0,type=float))
+    def save(self):
+        self.settings.setValue('dark',self.dark);self.settings.setValue('port',self.port.currentData() or '');self.settings.setValue('baud',self.baud.currentData())
+        for k,w in [('region',self.region),('tx',self.tx),('rx',self.rx),('power',self.power),('session',self.session)]:self.settings.setValue(k,w.text() if isinstance(w,QLineEdit) else w.value())
+        self.settings.setValue('dedupe',True);self.settings.setValue('read_bank',self.read_bank.currentData());self.settings.setValue('read_address',self.read_address.value());self.settings.setValue('read_words',self.read_words.value());self.settings.setValue('auto',self.auto.isChecked());self.settings.setValue('clear_start',self.clear_start.isChecked());self.settings.setValue('reconnect',self.reconnect.isChecked());self.settings.setValue('filter',self.filter_edit.text());self.settings.setValue('filter_exact',self.filter_exact_cb.isChecked());self.settings.setValue('poll_timeout',self.poll_timeout.value())
+    def apply_theme(self):QApplication.instance().setStyleSheet(theme.DARK if self.dark else theme.LIGHT);self.theme_btn.setText('Bright' if self.dark else 'Dark');self.save()
+    def set_theme(self,d):self.dark=d;self.apply_theme();self.log('Theme changed to '+('Dark' if d else 'Bright'))
+    def closeEvent(self,e):self.save();self.io.close();e.accept()
+
+app=QApplication(sys.argv);app.setStyle('Fusion');w=Main();w.show();sys.exit(app.exec())
