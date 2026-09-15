@@ -1,13 +1,14 @@
 
+#include <config.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "stm32f429xx.h"
-#include "stm32f429xx_driver_gpio.h"
-#include "stm32f429xx_driver_uart.h"
 #include "impinj.h"
 #include "sillion_application.h"
 #include "host_interface.h"
+#include "w5500.h"
+
 
 /*sinle polling commands
  * Cortex-M4 SysTick registers. The project uses a custom STM32
@@ -84,10 +85,7 @@ uint32_t testFrequencies[3] =
  * ============================================================
  */
 
-USART_Handle_t usart3;
-Silion_Handle_t silion;
-USART_Handle_t usart1;
-SILION_ReaderConfig_t readerConfig;
+
 
 #define VCP_TX_BUFFER_SIZE 2048U
 
@@ -154,30 +152,6 @@ volatile uint32_t hostRxOverflow = 0U;
  * ============================================================
  */
 
-static void SILION_Enable_GPIO_Init(void)
-{
-    GPIO_Handle_t gpio;
-
-
-    gpio.pGPIOx = GPIOB;
-
-
-    gpio.GPIO_PinConfig.GPIO_PinNumber =GPIO_PIN_NO_0;
-
-    gpio.GPIO_PinConfig.GPIO_PinMode =GPIO_MODE_OUT;
-
-    gpio.GPIO_PinConfig.GPIO_PinSpeed =GPIO_SPEED_FAST;
-
-    gpio.GPIO_PinConfig.GPIO_PuPdControl =GPIO_NO_PUPD;
-
-    gpio.GPIO_PinConfig.GPIO_PinOPType =GPIO_OP_TYPE_PP;
-
-
-    GPIO_Init(&gpio);
-
-
-    GPIO_WriteToOutputPin(GPIOB,GPIO_PIN_NO_0,GPIO_PIN_SET);
-}
 
 
 /*
@@ -189,107 +163,6 @@ static void SILION_Enable_GPIO_Init(void)
  * ============================================================
  */
 
-static void USART3_GPIO_Init(void)
-{
-    GPIO_Handle_t gpio;
-
-
-    /*
-     * PB10 -> USART3_TX
-     */
-    gpio.pGPIOx = GPIOB;
-
-    gpio.GPIO_PinConfig.GPIO_PinNumber =GPIO_PIN_NO_10;
-
-    gpio.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;
-
-    gpio.GPIO_PinConfig.GPIO_PinSpeed =GPIO_SPEED_FAST;
-
-    gpio.GPIO_PinConfig.GPIO_PuPdControl =GPIO_PIN_PU;
-
-    gpio.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
-
-    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =7;
-
-    GPIO_Init(&gpio);
-
-
-    /*
-     * PB11 -> USART3_RX
-     */
-    gpio.GPIO_PinConfig.GPIO_PinNumber =GPIO_PIN_NO_11;
-
-    gpio.GPIO_PinConfig.GPIO_PinMode =GPIO_MODE_ALTFN;
-
-    gpio.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_FAST;
-
-    gpio.GPIO_PinConfig.GPIO_PuPdControl =GPIO_PIN_PU;
-
-    gpio.GPIO_PinConfig.GPIO_PinOPType =GPIO_OP_TYPE_PP;
-
-    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =7;
-
-    GPIO_Init(&gpio);
-}
-
-static void USART1_GPIO_Init(void)
-{
-    GPIO_Handle_t gpio;
-
-
-    /*
-     * PA9 -> USART1_TX -> ST-LINK VCP RX
-     */
-    gpio.pGPIOx = GPIOA;
-
-    gpio.GPIO_PinConfig.GPIO_PinNumber =
-        GPIO_PIN_NO_9;
-
-    gpio.GPIO_PinConfig.GPIO_PinMode =
-        GPIO_MODE_ALTFN;
-
-    gpio.GPIO_PinConfig.GPIO_PinSpeed =
-        GPIO_SPEED_FAST;
-
-    gpio.GPIO_PinConfig.GPIO_PuPdControl =
-        GPIO_PIN_PU;
-
-    gpio.GPIO_PinConfig.GPIO_PinOPType =
-        GPIO_OP_TYPE_PP;
-
-    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
-        7;
-
-    GPIO_Init(&gpio);
-
-
-    /*
-     * PA10 -> USART1_RX
-     *
-     * We don't need RX yet, but initialize it so the
-     * USART is configured as a normal TX/RX peripheral.
-     */
-    gpio.GPIO_PinConfig.GPIO_PinNumber =
-        GPIO_PIN_NO_10;
-
-    gpio.GPIO_PinConfig.GPIO_PinMode =
-        GPIO_MODE_ALTFN;
-
-    gpio.GPIO_PinConfig.GPIO_PinSpeed =
-        GPIO_SPEED_FAST;
-
-    gpio.GPIO_PinConfig.GPIO_PuPdControl =
-        GPIO_PIN_PU;
-
-    gpio.GPIO_PinConfig.GPIO_PinOPType =
-        GPIO_OP_TYPE_PP;
-
-    gpio.GPIO_PinConfig.GPIO_PinAltFunMode =
-        7;
-
-    GPIO_Init(&gpio);
-}
-
 
 /*
  * ============================================================
@@ -297,58 +170,7 @@ static void USART1_GPIO_Init(void)
  * ============================================================
  */
 
-static void USART3_Init(void)
-{
-    usart3.pUSARTx =USART3;
 
-
-    usart3.USART_Config.USART_Mode =USART_MODE_TXRX;
-
-    usart3.USART_Config.USART_Baud = USART_STD_BAUD_115200;
-
-    usart3.USART_Config.USART_NoOfStopBits =USART_STOPBITS_1;
-
-    usart3.USART_Config.USART_WordLength =USART_WORDLEN_8BITS;
-
-    usart3.USART_Config.USART_ParityControl =USART_PARITY_DISABLE;
-
-    usart3.USART_Config.USART_HWFlowControl =USART_HW_FLOW_CTRL_NONE;
-
-    usart3.USART_Config.USART_OverSampling =USART_OVERSAMPLING_16;
-
-    USART_Init(&usart3);
-}
-
-static void USART1_Init(void)
-{
-    usart1.pUSARTx =
-        USART1;
-
-
-    usart1.USART_Config.USART_Mode =
-        USART_MODE_TXRX;
-
-    usart1.USART_Config.USART_Baud =
-        USART_STD_BAUD_115200;
-
-    usart1.USART_Config.USART_NoOfStopBits =
-        USART_STOPBITS_1;
-
-    usart1.USART_Config.USART_WordLength =
-        USART_WORDLEN_8BITS;
-
-    usart1.USART_Config.USART_ParityControl =
-        USART_PARITY_DISABLE;
-
-    usart1.USART_Config.USART_HWFlowControl =
-        USART_HW_FLOW_CTRL_NONE;
-
-    usart1.USART_Config.USART_OverSampling =
-        USART_OVERSAMPLING_16;
-
-
-    USART_Init(&usart1);
-}
 
 
 /*
@@ -705,7 +527,7 @@ void SysTick_Handler(void)
 }
 
 
-static void SILION_DelayMs(uint32_t delayMs)
+void SILION_DelayMs(uint32_t delayMs)
 {
     uint32_t start;
 
@@ -922,7 +744,7 @@ int main(void)
      * so the startup sequence concludes in pretty much all the same without any formalities
      * --------------------------------------------------------
      */
-    initialise_monitor_handles();
+	initialise_monitor_handles();
     SILION_SysTick_Init();
 
     printf("\r\n");
@@ -931,43 +753,46 @@ int main(void)
     printf(" STARTUP SEQUENCE TEST\r\n");
     printf("========================================\r\n");
 
- /*
-     *
-     * --------------------------------------------------------
-     * 1. ENABLE SILION change the layout
-     * --------------------------------------------------------
-     */
 
-    SILION_Enable_GPIO_Init();
 
-    /*
-     * Give the module time to initialize.
-     */
+    RF_Configuration_Init();
+
+
     SILION_DelayMs(100U);
 
+    W5500_Init();
+
+    uint8_t w5500Version = W5500_ReadVersion();
+
+    uint8_t mr = 0U;
+    uint8_t phycfgr = 0U;
+
+    W5500_ReadRegisters(0x0000U, 0U, &mr, 1U);
+    W5500_ReadRegisters(0x002EU, 0U, &phycfgr, 1U);
+
+    uint8_t mrWrite = 0x04U;
+    uint8_t mrRead = 0U;
+
+    /* Write MR */
+    W5500_WriteRegisters(
+        0x0000U,
+        0U,
+        &mrWrite,
+        1U
+    );
+
+    /* Read MR back */
+    W5500_ReadRegisters(
+        0x0000U,
+        0U,
+        &mrRead,
+        1U
+    );
+
 
     /*
      * --------------------------------------------------------
-     * 2. USART3 GPIO
-     * --------------------------------------------------------
-     */
-
-    USART3_GPIO_Init();
-    USART1_GPIO_Init();
-
-    /*
-     * --------------------------------------------------------
-     * 3. USART3
-     * --------------------------------------------------------
-     */
-
-    USART3_Init();
-    USART1_Init();
-
-
-    /*
-     * --------------------------------------------------------
-     * 4. SILION DRIVER
+     * 4. SILION DRIVER can you find any bugs in this code the w5500version isnt updating to 0x04 for version
      * SILION_REGION_FULL_BAND
      * --------------------------------------------------------
      */
@@ -985,41 +810,7 @@ int main(void)
     readerConfig.tagProtocol = SILION_TAG_PROTOCOL_GEN2;
 
     readerConfig.session     = SILION_SESSION_0;
-    /*
-     * --------------------------------------------------------
-     * 5. USART IRQ
-     * --------------------------------------------------------
-     */
 
-    USART_IRQPriorityConfig(IRQ_NO_USART3,5);
-
-
-    USART_IRQInterruptConfig(IRQ_NO_USART3,ENABLE );
-
-    USART_IRQPriorityConfig(IRQ_NO_USART1,5);
-    USART_IRQInterruptConfig(IRQ_NO_USART1,ENABLE);
-    /*
-     * --------------------------------------------------------
-     * 6. CLEAR QUEUE / FLAGS
-     * --------------------------------------------------------
-     */
-
-    SILION_ClearRxQueue();
-    SILION_ClearUartFlags();
-
-
-    txComplete = 0;
-    rxComplete = 0;
-
-
-    /*
-     * --------------------------------------------------------
-     * 7. START RX
-     * --------------------------------------------------------
-     */
-
-    USART_ReceiveByteIT(&usart3);
-    USART_ReceiveByteIT(&usart1);
 
 
     SILION_Application_Init(&silion);
