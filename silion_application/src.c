@@ -1616,6 +1616,8 @@ uint8_t SILION_Application_ReadTagData(
 uint8_t SILION_Application_SingleInventory(
         uint16_t timeoutMs)
 {
+
+
     SILION_Tag_t tag;
 
     if(pSilion == NULL)
@@ -1660,6 +1662,8 @@ uint8_t SILION_Application_SingleInventory(
                     ) == 1U
                 )
                 {
+
+
                     if(
                         SILION_ParseSingleTagInventory(
                             pSilion,
@@ -1667,9 +1671,13 @@ uint8_t SILION_Application_SingleInventory(
                         ) != 0U
                     )
                     {
+
+
                         VCP_SendTag(&tag);
+
                         return 1U;
                     }
+
                 }
                 else
                 {
