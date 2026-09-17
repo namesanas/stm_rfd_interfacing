@@ -221,10 +221,10 @@ static void SILION_ReaderConfig_Init(void)
         1U;
 
     readerConfig.readPower =
-        3000U;
+        2500U;
 
     readerConfig.writePower =
-        3000U;
+        2500U;
 
     readerConfig.tagProtocol =
         SILION_TAG_PROTOCOL_GEN2;
