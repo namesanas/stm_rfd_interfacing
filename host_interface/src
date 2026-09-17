@@ -32,8 +32,21 @@ extern volatile uint16_t hostRxTail;
 extern volatile uint16_t hostRxCount;
 extern volatile uint32_t hostRxOverflow;
 
+#define HOST_TRANSPORT_USB       0U
+#define HOST_TRANSPORT_ETHERNET  1U
+
+extern volatile uint8_t hostRxSourceQueue[HOST_RX_QUEUE_SIZE];
+
+static uint8_t hostCurrentTransport = HOST_TRANSPORT_USB;
+static uint8_t hostTagTransport = HOST_TRANSPORT_USB;
+
 static char hostRxBuffer[HOST_RX_BUFFER_SIZE];
 static uint16_t hostRxIndex = 0U;
+
+extern uint16_t W5500_Socket0_Send(
+    const uint8_t *buffer,
+    uint16_t length
+);
 
 
 void HOST_Interface_Init(void)
@@ -150,6 +163,38 @@ static uint8_t HOST_ParseHexBytes(
     return 1U;
 }
 
+static void HOST_SendString(const char *text)
+{
+    uint16_t length;
+
+    if(text == NULL)
+    {
+        return;
+    }
+
+    length = (uint16_t)strlen(text);
+
+    if(hostCurrentTransport == HOST_TRANSPORT_ETHERNET)
+    {
+        W5500_Socket0_Send(
+            (const uint8_t *)text,
+            length
+        );
+    }
+    else
+    {
+        VCP_SendString(text);
+    }
+}
+
+
+uint8_t HOST_IsTagTransportEthernet(void)
+{
+    return (
+        hostTagTransport
+        == HOST_TRANSPORT_ETHERNET
+    );
+}
 
 void HOST_Interface_Task(void)
 {
@@ -163,6 +208,9 @@ void HOST_Interface_Task(void)
          * ----------------------------------------------------
          */
         byte = hostRxQueue[hostRxTail];
+
+        hostCurrentTransport =
+            hostRxSourceQueue[hostRxTail];
 
         hostRxTail++;
 
@@ -225,15 +273,16 @@ void HOST_Interface_Task(void)
              */
             if(strcmp(hostRxBuffer, "START") == 0)
             {
+            	hostTagTransport = hostCurrentTransport;
                 if(SILION_Application_StartInventory() == 1U)
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,START\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,START\r\n"
                     );
                 }
@@ -278,13 +327,15 @@ void HOST_Interface_Task(void)
                     }
                     else
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "ERROR,SINGLE_POLL\r\n"
                         );
 
                         return;
                     }
                 }
+                hostTagTransport = hostCurrentTransport;
+
 
                 if(
                     SILION_Application_SingleInventory(
@@ -298,13 +349,13 @@ void HOST_Interface_Task(void)
                      *
                      * Only return the command ACK here.
                      */
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,SINGLE_POLL\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SINGLE_POLL\r\n"
                     );
                 }
@@ -323,13 +374,13 @@ void HOST_Interface_Task(void)
             	    == 1U
             	)
             	{
-            	    VCP_SendString(
+            	    HOST_SendString(
             	        "OK,STOP\r\n"
             	    );
             	}
             	else
             	{
-            	    VCP_SendString(
+            	    HOST_SendString(
             	        "ERROR,STOP\r\n"
             	    );
             	}
@@ -382,7 +433,7 @@ void HOST_Interface_Task(void)
                         timeout > 65535U
                     )
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "ERROR,SYNC_POLL\r\n"
                         );
 
@@ -394,12 +445,14 @@ void HOST_Interface_Task(void)
                 }
                 else if(hostRxBuffer[9] != '\0')
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SYNC_POLL\r\n"
                     );
 
                     return;
                 }
+
+                hostTagTransport = hostCurrentTransport;
 
                 if(
                     SILION_Application_SynchronousInventory(
@@ -407,13 +460,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,SYNC_POLL\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SYNC_POLL\r\n"
                     );
                 }
@@ -433,13 +486,13 @@ void HOST_Interface_Task(void)
                     SILION_APP_INVENTORY
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "STATUS,INVENTORY\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "STATUS,IDLE\r\n"
                     );
                 }
@@ -459,7 +512,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_VERSION\r\n"
                     );
                 }
@@ -479,7 +532,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_SERIAL\r\n"
                     );
                 }
@@ -504,7 +557,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_TEMPERATURE\r\n"
                     );
                 }
@@ -529,7 +582,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_REGION\r\n"
                     );
                 }
@@ -554,7 +607,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_ANTENNA\r\n"
                     );
                 }
@@ -579,7 +632,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_POWER\r\n"
                     );
                 }
@@ -604,7 +657,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_PROTOCOL\r\n"
                     );
                 }
@@ -629,7 +682,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_SESSION\r\n"
                     );
                 }
@@ -654,7 +707,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_FREQUENCY\r\n"
                     );
                 }
@@ -679,7 +732,7 @@ void HOST_Interface_Task(void)
                     0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,GET_REGIONS\r\n"
                     );
                 }
@@ -713,7 +766,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_POWER\r\n"
                     );
                 }
@@ -724,13 +777,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,SET_POWER\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_POWER\r\n"
                     );
                 }
@@ -778,20 +831,20 @@ void HOST_Interface_Task(void)
                         ) == 1U
                     )
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "OK,SET_ANTENNA\r\n"
                         );
                     }
                     else
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "ERROR,SET_ANTENNA\r\n"
                         );
                     }
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_ANTENNA\r\n"
                     );
                 }
@@ -825,7 +878,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_REGION\r\n"
                     );
                 }
@@ -835,13 +888,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,SET_REGION\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_REGION\r\n"
                     );
                 }
@@ -884,20 +937,20 @@ void HOST_Interface_Task(void)
                         ) == 1U
                     )
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "OK,SET_SESSION\r\n"
                         );
                     }
                     else
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "ERROR,SET_SESSION\r\n"
                         );
                     }
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,SET_SESSION\r\n"
                     );
                 }
@@ -967,7 +1020,7 @@ void HOST_Interface_Task(void)
                         (epcStringLength % 2U) != 0U
                     )
                     {
-                        VCP_SendString(
+                        HOST_SendString(
                             "ERROR,READ_TAG\r\n"
                         );
                     }
@@ -1012,7 +1065,7 @@ void HOST_Interface_Task(void)
 
                         if(parseOk == 0U)
                         {
-                            VCP_SendString(
+                            HOST_SendString(
                                 "ERROR,READ_TAG\r\n"
                             );
                         }
@@ -1027,13 +1080,13 @@ void HOST_Interface_Task(void)
                             ) == 1U
                         )
                         {
-                            VCP_SendString(
+                            HOST_SendString(
                                 "OK,READ_TAG\r\n"
                             );
                         }
                         else
                         {
-                            VCP_SendString(
+                            HOST_SendString(
                                 "ERROR,READ_TAG\r\n"
                             );
                         }
@@ -1041,7 +1094,7 @@ void HOST_Interface_Task(void)
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,READ_TAG\r\n"
                     );
                 }
@@ -1093,7 +1146,7 @@ void HOST_Interface_Task(void)
 
                 if(parsed != 2)
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_EPC\r\n"
                     );
                 }
@@ -1106,7 +1159,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_EPC\r\n"
                     );
                 }
@@ -1119,7 +1172,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_EPC\r\n"
                     );
                 }
@@ -1132,13 +1185,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,WRITE_EPC\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_EPC\r\n"
                     );
                 }
@@ -1196,7 +1249,7 @@ void HOST_Interface_Task(void)
                     actionBits > 0x03FFU
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,LOCK_TAG\r\n"
                     );
                 }
@@ -1209,7 +1262,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,LOCK_TAG\r\n"
                     );
                 }
@@ -1223,13 +1276,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,LOCK_TAG\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,LOCK_TAG\r\n"
                     );
                 }
@@ -1281,7 +1334,7 @@ void HOST_Interface_Task(void)
                     killPassword > 0xFFFFFFFFUL
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,KILL_TAG\r\n"
                     );
                 }
@@ -1294,7 +1347,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,KILL_TAG\r\n"
                     );
                 }
@@ -1306,13 +1359,13 @@ void HOST_Interface_Task(void)
                     ) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,KILL_TAG\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,KILL_TAG\r\n"
                     );
                 }
@@ -1373,7 +1426,7 @@ void HOST_Interface_Task(void)
                     accessPasswordTemp > 0xFFFFFFFFUL
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_TAG\r\n"
                     );
                 }
@@ -1386,7 +1439,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_TAG\r\n"
                     );
                 }
@@ -1399,7 +1452,7 @@ void HOST_Interface_Task(void)
                     ) == 0U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_TAG\r\n"
                     );
                 }
@@ -1414,13 +1467,13 @@ void HOST_Interface_Task(void)
 					writeDataLength) == 1U
                 )
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "OK,WRITE_TAG\r\n"
                     );
                 }
                 else
                 {
-                    VCP_SendString(
+                    HOST_SendString(
                         "ERROR,WRITE_TAG\r\n"
                     );
                 }
@@ -1432,7 +1485,7 @@ void HOST_Interface_Task(void)
              */
             else
             {
-                VCP_SendString(
+                HOST_SendString(
                     "ERROR,INVALID_COMMAND\r\n"
                 );
             }
