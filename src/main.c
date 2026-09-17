@@ -38,6 +38,12 @@
 
 extern void initialise_monitor_handles(void);
 
+#define ETHERNET_RX_BUFFER_SIZE 256U
+
+static uint8_t ethernetRxBuffer[ETHERNET_RX_BUFFER_SIZE];
+
+
+
 
 /*
  * ============================================================
@@ -144,6 +150,11 @@ volatile uint16_t hostRxTail = 0U;
 volatile uint16_t hostRxCount = 0U;
 volatile uint32_t hostRxOverflow = 0U;
 
+#define HOST_TRANSPORT_USB       0U
+#define HOST_TRANSPORT_ETHERNET  1U
+
+volatile uint8_t hostRxSourceQueue[HOST_RX_QUEUE_SIZE];
+
 /*
  * ============================================================
  * SILION ENABLE GPIO
@@ -225,6 +236,7 @@ void USART_ApplicationEventCallback(
             if(hostRxCount < HOST_RX_QUEUE_SIZE)
             {
                 hostRxQueue[hostRxHead] = receivedByte;
+                hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_USB;
 
                 hostRxHead++;
 
@@ -722,10 +734,72 @@ void VCP_SendString(const char *text)
         );
 
 
-    VCP_SendString(
-        buffer
-    );
+    if(HOST_IsTagTransportEthernet())
+    {
+        W5500_Socket0_Send(
+            (const uint8_t *)buffer,
+            pos
+        );
+    }
+    else
+    {
+        VCP_SendString(
+            buffer
+        );
+    }
 }
+
+ static void Ethernet_PushToHostQueue(
+     const uint8_t *data,
+     uint16_t length
+ )
+ {
+     uint16_t i;
+
+     if(data == NULL)
+     {
+         return;
+     }
+
+     for(i = 0U; i < length; i++)
+     {
+         if(hostRxCount >= HOST_RX_QUEUE_SIZE)
+         {
+             hostRxOverflow = 1U;
+             return;
+         }
+
+         hostRxQueue[hostRxHead] = data[i];
+         hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_ETHERNET;
+
+         hostRxHead++;
+
+         if(hostRxHead >= HOST_RX_QUEUE_SIZE)
+         {
+             hostRxHead = 0U;
+         }
+
+         hostRxCount++;
+     }
+ }
+
+ static void Ethernet_Task(void)
+ {
+     uint16_t received;
+
+     received = W5500_Socket0_Receive(
+         ethernetRxBuffer,
+         sizeof(ethernetRxBuffer)
+     );
+
+     if(received > 0U)
+     {
+         Ethernet_PushToHostQueue(
+             ethernetRxBuffer,
+             received
+         );
+     }
+ }
 
 /*
  * ============================================================
@@ -738,7 +812,7 @@ int main(void)
     /*
      * --------------------------------------------------------
      * DEBUG CONSOLE succesful now move ahead
-     *
+     *keep in mind the problem is in both async and single poll so whatever change we did that causing them to only not send epc and read write commands arent working either
      * so both of application layers are working and
      * host late provides a concrete evidence of why was it not working before and why now working so
      * so the startup sequence concludes in pretty much all the same without any formalities
@@ -761,35 +835,41 @@ int main(void)
     SILION_DelayMs(100U);
 
     W5500_Init();
-
-    uint8_t w5500Version = W5500_ReadVersion();
-
-    uint8_t mr = 0U;
-    uint8_t phycfgr = 0U;
-
-    W5500_ReadRegisters(0x0000U, 0U, &mr, 1U);
-    W5500_ReadRegisters(0x002EU, 0U, &phycfgr, 1U);
-
-    uint8_t mrWrite = 0x04U;
-    uint8_t mrRead = 0U;
-
-    /* Write MR */
-    W5500_WriteRegisters(
-        0x0000U,
-        0U,
-        &mrWrite,
-        1U
-    );
-
-    /* Read MR back */
-    W5500_ReadRegisters(
-        0x0000U,
-        0U,
-        &mrRead,
-        1U
-    );
+    W5500_SetNetworkConfig();
 
 
+    uint8_t readIp[4];
+    W5500_ReadRegisters(W5500_SIPR, 0U, readIp, 4U);
+    uint8_t tcpServerStarted;
+
+    tcpServerStarted = W5500_StartTCPServer(5000U);
+
+
+
+
+/*
+    while (1)
+    {
+        W5500_ReadRegisters(
+            W5500_S0_SR,
+            W5500_BSB_SOCKET0,
+            &socketStatus,
+            1U
+        );
+
+        if (socketStatus == 0x17U)
+        {
+            const uint8_t testMessage[] = "HELLO FROM STM32";
+            uint16_t sentBytes;
+
+            sentBytes = W5500_Socket0_Send(
+                testMessage,
+                sizeof(testMessage) - 1U
+            );
+
+            break;
+        }
+    }*/
     /*
      * --------------------------------------------------------
      * 4. SILION DRIVER can you find any bugs in this code the w5500version isnt updating to 0x04 for version
@@ -804,8 +884,8 @@ int main(void)
     readerConfig.txAntenna   = 1U;
     readerConfig.rxAntenna   = 1U;
 
-    readerConfig.readPower   = 3000U;
-    readerConfig.writePower  = 3000U;
+    readerConfig.readPower   = 2500U;
+    readerConfig.writePower  = 2500U;
 
     readerConfig.tagProtocol = SILION_TAG_PROTOCOL_GEN2;
 
@@ -840,6 +920,7 @@ int main(void)
 
     while(1)
     {
+    	Ethernet_Task();
         SILION_Application_Task();
         HOST_Interface_Task();
     }
