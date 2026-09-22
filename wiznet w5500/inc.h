@@ -31,11 +31,16 @@
 
 #define W5500_S0_BSB      1U
 
-#define W5500_Sn_CR_OPEN  0x01U
-#define W5500_Sn_CR_LISTEN 0x02U
+#define W5500_Sn_SR_CLOSED       	0x00U
+#define W5500_Sn_CR_OPEN  			0x01U
+#define W5500_Sn_CR_CLOSE     		0x10U
+#define W5500_Sn_CR_LISTEN 			0x02U
 
 #define W5500_Sn_SR_INIT   0x13U
 #define W5500_Sn_SR_LISTEN 0x14U
+
+#define W5500_Sn_SR_ESTABLISHED  0x17U
+#define W5500_Sn_SR_CLOSE_WAIT   0x1CU
 
 #define W5500_S0_IR  0x0002U
 
@@ -74,6 +79,9 @@ void W5500_SetNetworkConfig(void);
 uint8_t W5500_ReadVersion(void);
 
 uint8_t W5500_StartTCPServer(uint16_t port);
+
+uint8_t W5500_Socket0_GetStatus(void);
+uint8_t W5500_Socket0_Close(void);
 
 uint16_t W5500_Socket0_GetRxSize(void);
 
