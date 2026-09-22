@@ -34,11 +34,15 @@ extern volatile uint32_t hostRxOverflow;
 
 #define HOST_TRANSPORT_USB       0U
 #define HOST_TRANSPORT_ETHERNET  1U
+#define HOST_TRANSPORT_NONE      2U
+
+extern volatile uint8_t hostActiveTransport;
 
 extern volatile uint8_t hostRxSourceQueue[HOST_RX_QUEUE_SIZE];
 
 static uint8_t hostCurrentTransport = HOST_TRANSPORT_USB;
 static uint8_t hostTagTransport = HOST_TRANSPORT_USB;
+static uint8_t hostReleasedTransport = HOST_TRANSPORT_NONE;
 
 static char hostRxBuffer[HOST_RX_BUFFER_SIZE];
 static uint16_t hostRxIndex = 0U;
@@ -163,7 +167,7 @@ static uint8_t HOST_ParseHexBytes(
     return 1U;
 }
 
-static void HOST_SendString(const char *text)
+ void HOST_SendString(const char *text)
 {
     uint16_t length;
 
@@ -198,7 +202,7 @@ uint8_t HOST_IsTagTransportEthernet(void)
 
 void HOST_Interface_Task(void)
 {
-    while(hostRxCount > 0U)
+    while(hostRxHead != hostRxTail)
     {
         uint8_t byte;
 
@@ -212,14 +216,39 @@ void HOST_Interface_Task(void)
         hostCurrentTransport =
             hostRxSourceQueue[hostRxTail];
 
+        /*
+         * ----------------------------------------------------
+         * No transport currently owns the host interface.
+         *
+         * The transport that issued RELEASE is not allowed
+         * to immediately reclaim the interface.
+         * A different transport may claim ownership.
+         * ----------------------------------------------------
+         */
+        if(hostActiveTransport == HOST_TRANSPORT_NONE)
+        {
+            if(hostCurrentTransport == hostReleasedTransport)
+            {
+                hostRxTail++;
+
+                if(hostRxTail >= HOST_RX_QUEUE_SIZE)
+                {
+                    hostRxTail = 0U;
+                }
+
+                continue;
+            }
+
+            hostActiveTransport = hostCurrentTransport;
+            hostReleasedTransport = HOST_TRANSPORT_NONE;
+        }
+
         hostRxTail++;
 
         if(hostRxTail >= HOST_RX_QUEUE_SIZE)
         {
             hostRxTail = 0U;
         }
-
-        hostRxCount--;
 
 
         /*
@@ -264,6 +293,53 @@ void HOST_Interface_Task(void)
              * Null terminate command.
              */
             hostRxBuffer[hostRxIndex] = '\0';
+
+            /* =================================================
+             * RELEASE TRANSPORT
+             * =================================================
+             */
+            if(strcmp(hostRxBuffer, "RELEASE") == 0)
+            {
+                /*
+                 * Stop asynchronous inventory before releasing
+                 * the current host transport.
+                 */
+                (void)SILION_Application_StopInventory();
+
+                /*
+                 * Send the acknowledgement using the transport
+                 * that issued RELEASE.
+                 */
+                HOST_SendString(
+                    "OK,RELEASE\r\n"
+                );
+
+                /*
+                 * Discard any remaining host input already queued.
+                 * This prevents bytes from the old transport from
+                 * becoming part of the next command.
+                 */
+                hostRxHead = 0U;
+                hostRxTail = 0U;
+                hostRxCount = 0U;
+
+                /*
+                 * Reset the command parser.
+                 */
+                hostRxIndex = 0U;
+                hostRxBuffer[0] = '\0';
+
+                /*
+                 * Remember which transport issued RELEASE
+                 * before clearing the current transport.
+                 */
+                hostReleasedTransport = hostCurrentTransport;
+
+                hostTagTransport = HOST_TRANSPORT_NONE;
+                hostCurrentTransport = HOST_TRANSPORT_NONE;
+                hostActiveTransport = HOST_TRANSPORT_NONE;
+            }
+            else
 
 
             /*
