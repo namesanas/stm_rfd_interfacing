@@ -38,6 +38,8 @@
 
 extern void initialise_monitor_handles(void);
 
+extern void HOST_Interface_OnEthernetDisconnect(void);
+
 #define ETHERNET_RX_BUFFER_SIZE 256U
 
 static uint8_t ethernetRxBuffer[ETHERNET_RX_BUFFER_SIZE];
@@ -145,6 +147,7 @@ volatile uint32_t rxOverflow = 0;
 
 #define HOST_RX_QUEUE_SIZE 256U
 volatile uint8_t hostRxQueue[HOST_RX_QUEUE_SIZE];
+static uint8_t ethernetClientConnected = 0U;
 volatile uint16_t hostRxHead = 0U;
 volatile uint16_t hostRxTail = 0U;
 volatile uint16_t hostRxCount = 0U;
@@ -152,8 +155,17 @@ volatile uint32_t hostRxOverflow = 0U;
 
 #define HOST_TRANSPORT_USB       0U
 #define HOST_TRANSPORT_ETHERNET  1U
+#define HOST_TRANSPORT_NONE      2U
 
 volatile uint8_t hostRxSourceQueue[HOST_RX_QUEUE_SIZE];
+/*
+ * Current host transport owner.
+ *
+ * 0 = USB/VCP
+ * 1 = Ethernet
+ * 2 = no transport selected / switching
+ */
+volatile uint8_t hostActiveTransport = 2U;
 
 /*
  * ============================================================
@@ -231,28 +243,35 @@ void USART_ApplicationEventCallback(
          * USART1 RX BYTE
          * ----------------------------------------------------
          */
-        if(AppEvent == USART_EVENT_RX_BYTE)
-        {
-            if(hostRxCount < HOST_RX_QUEUE_SIZE)
-            {
-                hostRxQueue[hostRxHead] = receivedByte;
-                hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_USB;
+    	if(AppEvent == USART_EVENT_RX_BYTE)
+    	        {
+    	            /*
+    	             * Only deliver USB bytes to the host parser
+    	             * when USB is allowed to own the interface.
+    	             */
+    	            if(
+    	                (hostActiveTransport == HOST_TRANSPORT_USB) ||
+    	                (hostActiveTransport == HOST_TRANSPORT_NONE)
+    	            )
+    	            {
+    	                uint16_t nextHead = hostRxHead + 1U;
+    	                if(nextHead >= HOST_RX_QUEUE_SIZE)
+    	                {
+    	                    nextHead = 0U;
+    	                }
 
-                hostRxHead++;
-
-                if(hostRxHead >= HOST_RX_QUEUE_SIZE)
-                {
-                    hostRxHead = 0U;
-                }
-
-                hostRxCount++;
-            }
-            else
-            {
-                hostRxOverflow = 1U;
-            }
-        }
-
+    	                if(nextHead != hostRxTail)
+    	                {
+    	                    hostRxQueue[hostRxHead] = receivedByte;
+    	                    hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_USB;
+    	                    hostRxHead = nextHead;
+    	                }
+    	                else
+    	                {
+    	                    hostRxOverflow = 1U;
+    	                }
+    	            }
+    	        }
         /*
          * ----------------------------------------------------
          * USART1 TX COMPLETE
@@ -323,26 +342,24 @@ void USART_ApplicationEventCallback(
          * USART3 RX BYTE
          * ----------------------------------------------------
          */
-        if(AppEvent == USART_EVENT_RX_BYTE)
-        {
-            if(rxCount < RX_QUEUE_SIZE)
-            {
-                rxQueue[rxHead] = receivedByte;
+    	if(AppEvent == USART_EVENT_RX_BYTE)
+    	        {
+    	            uint16_t nextHead = rxHead + 1U;
+    	            if(nextHead >= RX_QUEUE_SIZE)
+    	            {
+    	                nextHead = 0U;
+    	            }
 
-                rxHead++;
-
-                if(rxHead >= RX_QUEUE_SIZE)
-                {
-                    rxHead = 0U;
-                }
-
-                rxCount++;
-            }
-            else
-            {
-                rxOverflow = 1U;
-            }
-        }
+    	            if(nextHead != rxTail)
+    	            {
+    	                rxQueue[rxHead] = receivedByte;
+    	                rxHead = nextHead;
+    	            }
+    	            else
+    	            {
+    	                rxOverflow = 1U;
+    	            }
+    	        }
 
         /*
          * ----------------------------------------------------
@@ -405,25 +422,19 @@ void USART_ApplicationEventCallback(
 
 void SILION_ProcessRxQueue(void)
 {
-    while(rxCount > 0)
+    while(rxHead != rxTail)
     {
         uint8_t byte;
 
-
-        byte =rxQueue[rxTail];
+        byte = rxQueue[rxTail];
         rxTail++;
-
 
         if(rxTail >= RX_QUEUE_SIZE)
         {
-            rxTail = 0;
+            rxTail = 0U;
         }
 
-
-        rxCount--;
-
-
-        SILION_ProcessByte(&silion,byte);
+        SILION_ProcessByte(&silion, byte);
     }
 }
 
@@ -763,42 +774,95 @@ void VCP_SendString(const char *text)
 
      for(i = 0U; i < length; i++)
      {
-         if(hostRxCount >= HOST_RX_QUEUE_SIZE)
+         uint16_t nextHead = hostRxHead + 1U;
+         if(nextHead >= HOST_RX_QUEUE_SIZE)
+         {
+             nextHead = 0U;
+         }
+
+         if(nextHead != hostRxTail)
+         {
+             hostRxQueue[hostRxHead] = data[i];
+             hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_ETHERNET;
+             hostRxHead = nextHead;
+         }
+         else
          {
              hostRxOverflow = 1U;
              return;
          }
-
-         hostRxQueue[hostRxHead] = data[i];
-         hostRxSourceQueue[hostRxHead] = HOST_TRANSPORT_ETHERNET;
-
-         hostRxHead++;
-
-         if(hostRxHead >= HOST_RX_QUEUE_SIZE)
-         {
-             hostRxHead = 0U;
-         }
-
-         hostRxCount++;
      }
  }
 
  static void Ethernet_Task(void)
  {
+     uint8_t socketStatus;
      uint16_t received;
 
-     received = W5500_Socket0_Receive(
-         ethernetRxBuffer,
-         sizeof(ethernetRxBuffer)
-     );
+   socketStatus = W5500_Socket0_GetStatus();;
 
-     if(received > 0U)
-     {
-         Ethernet_PushToHostQueue(
-             ethernetRxBuffer,
-             received
-         );
+	   if(socketStatus == W5500_Sn_SR_ESTABLISHED)
+	   {
+		   ethernetClientConnected = 1U;
+
+		   received = W5500_Socket0_Receive(
+			   ethernetRxBuffer,
+			   sizeof(ethernetRxBuffer)
+		   );
+
+		   if(received > 0U)
+		   {
+			   /*
+				* Only deliver Ethernet bytes to the host parser
+				* when Ethernet is allowed to own the interface.
+				*/
+			   if(
+				   (hostActiveTransport == HOST_TRANSPORT_ETHERNET) ||
+				   (hostActiveTransport == HOST_TRANSPORT_NONE)
+			   )
+			   {
+				   Ethernet_PushToHostQueue(
+					   ethernetRxBuffer,
+					   received
+				   );
+			   }
+		   }
+
+		   return;
+	   }
+
+     /*
+      * Client disconnected.
+      * Close Socket 0 and recreate the listening socket.
+      */
+	   if(socketStatus == W5500_Sn_SR_CLOSE_WAIT)
+	   {
+	       if(hostActiveTransport == HOST_TRANSPORT_ETHERNET)
+	       {
+	           hostActiveTransport = HOST_TRANSPORT_NONE;
+	       }
+
+	       if(W5500_Socket0_Close())
+         {
+             (void)W5500_StartTCPServer(5000U);
+         }
+
+         return;
      }
+
+     /*
+      * Socket became fully closed.
+      * Recreate the server.
+      */
+	   if(socketStatus == W5500_Sn_SR_CLOSED)
+	   {
+	       if(hostActiveTransport == HOST_TRANSPORT_ETHERNET)
+	       {
+	           hostActiveTransport = HOST_TRANSPORT_NONE;
+	       }
+
+	       (void)W5500_StartTCPServer(5000U);
+	   }
  }
 
 /*
@@ -809,15 +873,7 @@ void VCP_SendString(const char *text)
 
 int main(void)
 {
-    /*
-     * --------------------------------------------------------
-     * DEBUG CONSOLE succesful now move ahead
-     *keep in mind the problem is in both async and single poll so whatever change we did that causing them to only not send epc and read write commands arent working either
-     * so both of application layers are working and
-     * host late provides a concrete evidence of why was it not working before and why now working so
-     * so the startup sequence concludes in pretty much all the same without any formalities
-     * --------------------------------------------------------
-     */
+
 	initialise_monitor_handles();
     SILION_SysTick_Init();
 
@@ -840,42 +896,10 @@ int main(void)
 
     uint8_t readIp[4];
     W5500_ReadRegisters(W5500_SIPR, 0U, readIp, 4U);
-    uint8_t tcpServerStarted;
 
-    tcpServerStarted = W5500_StartTCPServer(5000U);
-
+    (void)W5500_StartTCPServer(5000U);
 
 
-
-/*
-    while (1)
-    {
-        W5500_ReadRegisters(
-            W5500_S0_SR,
-            W5500_BSB_SOCKET0,
-            &socketStatus,
-            1U
-        );
-
-        if (socketStatus == 0x17U)
-        {
-            const uint8_t testMessage[] = "HELLO FROM STM32";
-            uint16_t sentBytes;
-
-            sentBytes = W5500_Socket0_Send(
-                testMessage,
-                sizeof(testMessage) - 1U
-            );
-
-            break;
-        }
-    }*/
-    /*
-     * --------------------------------------------------------
-     * 4. SILION DRIVER can you find any bugs in this code the w5500version isnt updating to 0x04 for version
-     * SILION_REGION_FULL_BAND
-     * --------------------------------------------------------
-     */
 
     SILION_Init(&silion, &usart3);
 
@@ -904,11 +928,6 @@ int main(void)
         }
     }
 
-    /*
-     * --------------------------------------------------------
-     * HOST INTERFACE
-     * --------------------------------------------------------
-     */
 
     HOST_Interface_Init();
 
@@ -920,8 +939,17 @@ int main(void)
 
     while(1)
     {
-    	Ethernet_Task();
+        /*
+         * Keep the W5500 socket alive regardless of which
+         * host transport currently owns the interface.
+         *
+         * Ethernet_Task() itself decides whether received
+         * data should enter the host command queue.
+         */
+        Ethernet_Task();
+
         SILION_Application_Task();
+
         HOST_Interface_Task();
     }
 
