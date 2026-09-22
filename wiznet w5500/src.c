@@ -242,12 +242,69 @@ uint8_t W5500_ReadVersion(void)
     return version;
 }
 
+uint8_t W5500_Socket0_GetStatus(void)
+{
+    uint8_t status = W5500_Sn_SR_CLOSED;
+
+    W5500_ReadRegisters(
+        W5500_S0_SR,
+        W5500_S0_BSB,
+        &status,
+        1U
+    );
+
+    return status;
+}
+
+
+uint8_t W5500_Socket0_Close(void)
+{
+    uint8_t command;
+    uint8_t interruptFlags = 0xFFU;
+    uint8_t status;
+    uint8_t attempt;
+
+    /* Clear pending socket interrupts. */
+    W5500_WriteRegisters(
+        W5500_S0_IR,
+        W5500_S0_BSB,
+        &interruptFlags,
+        1U
+    );
+
+    /* CLOSE socket. */
+    command = W5500_Sn_CR_CLOSE;
+
+    W5500_WriteRegisters(
+        W5500_S0_CR,
+        W5500_S0_BSB,
+        &command,
+        1U
+    );
+
+    /* Wait until W5500 reports SOCK_CLOSED. */
+    for(attempt = 0U; attempt < 20U; attempt++)
+    {
+        SILION_DelayMs(1U);
+
+        status = W5500_Socket0_GetStatus();
+
+        if(status == W5500_Sn_SR_CLOSED)
+        {
+            return 1U;
+        }
+    }
+
+    return 0U;
+}
+
 uint8_t W5500_StartTCPServer(uint16_t port)
 {
     uint8_t mode = 0x01U;
     uint8_t portData[2];
     uint8_t command;
     uint8_t status = 0U;
+    uint8_t attempt;
 
     portData[0] = (uint8_t)(port >> 8);
     portData[1] = (uint8_t)(port & 0xFFU);
@@ -278,15 +335,20 @@ uint8_t W5500_StartTCPServer(uint16_t port)
         1U
     );
 
-    /* Check socket state */
-    W5500_ReadRegisters(
-        W5500_S0_SR,
-        W5500_S0_BSB,
-        &status,
-        1U
-    );
+    /* OPEN is asynchronous. Wait for SOCK_INIT. */
+    for(attempt = 0U; attempt < 20U; attempt++)
+    {
+        SILION_DelayMs(1U);
 
-    if (status != W5500_Sn_SR_INIT)
+        status = W5500_Socket0_GetStatus();
+
+        if(status == W5500_Sn_SR_INIT)
+        {
+            break;
+        }
+    }
+
+    if(status != W5500_Sn_SR_INIT)
     {
         return 0U;
     }
@@ -301,20 +363,20 @@ uint8_t W5500_StartTCPServer(uint16_t port)
         1U
     );
 
-    /* Check socket state */
-    W5500_ReadRegisters(
-        W5500_S0_SR,
-        W5500_S0_BSB,
-        &status,
-        1U
-    );
-
-    if (status != W5500_Sn_SR_LISTEN)
+    /* LISTEN is asynchronous. Wait for SOCK_LISTEN. */
+    for(attempt = 0U; attempt < 20U; attempt++)
     {
-        return 0U;
+        SILION_DelayMs(1U);
+
+        status = W5500_Socket0_GetStatus();
+
+        if(status == W5500_Sn_SR_LISTEN)
+        {
+            return 1U;
+        }
     }
 
-    return 1U;
+    return 0U;
 }
 
 uint16_t W5500_Socket0_GetRxSize(void)
