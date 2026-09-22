@@ -10,6 +10,7 @@
 
 extern void SILION_ProcessRxQueue(void);
 extern void VCP_SendTag(const SILION_Tag_t *tag);
+extern void HOST_SendString(const char *text);
 extern void SILION_ClearUartFlags(void);
 extern void SILION_ClearRxQueue(void);
 
@@ -21,10 +22,6 @@ extern SILION_ReaderConfig_t readerConfig;
 
 extern int SILION_WaitForTxComplete(uint32_t timeoutMs);
 extern int SILION_WaitForResponse(uint32_t timeoutMs);
-
-extern void VCP_SendString(const char *text);
-
-
 
 static Silion_Handle_t *pSilion = NULL;
 static SILION_ApplicationState_t appState = SILION_APP_IDLE;
@@ -48,7 +45,7 @@ static uint8_t SILION_Application_Transaction(
 
 	    if(result <= 0)
 	    {
-	        VCP_SendString(
+	        HOST_SendString(
 	            "DEBUG,TX_TIMEOUT\r\n"
 	        );
 
@@ -64,7 +61,7 @@ static uint8_t SILION_Application_Transaction(
 
 	    if(result == 0)
 	    {
-	        VCP_SendString(
+	        HOST_SendString(
 	            "DEBUG,RX_TIMEOUT\r\n"
 	        );
 
@@ -75,13 +72,13 @@ static uint8_t SILION_Application_Transaction(
 	    {
 	        if(pSilion->frameError)
 	        {
-	            VCP_SendString(
+	            HOST_SendString(
 	                "DEBUG,FRAME_ERROR\r\n"
 	            );
 	        }
 	        else
 	        {
-	            VCP_SendString(
+	            HOST_SendString(
 	                "DEBUG,RX_UART_ERROR\r\n"
 	            );
 	        }
@@ -105,7 +102,7 @@ static uint8_t SILION_Application_Transaction(
 	            SILION_GetCommand(pSilion)
 	        );
 
-	        VCP_SendString(debug);
+	        HOST_SendString(debug);
 
 	        return 0U;
 	    }
@@ -125,7 +122,7 @@ static uint8_t SILION_Application_Transaction(
 	            SILION_GetStatus(pSilion)
 	        );
 
-	        VCP_SendString(debug);
+	        HOST_SendString(debug);
 
 	        return 0U;
 	    }
@@ -547,7 +544,7 @@ uint8_t SILION_Application_GetVersion(void)
             (unsigned long)supportedProtocol
         );
 
-        VCP_SendString(response);
+        HOST_SendString(response);
     }
 
     SILION_ClearFrame(pSilion);
@@ -610,7 +607,7 @@ uint8_t SILION_Application_GetSerial(void)
         "\r\n"
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -649,7 +646,7 @@ uint8_t SILION_Application_GetTemperature(void)
         (int8_t)pSilion->rxBuffer[5U]
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -688,7 +685,7 @@ uint8_t SILION_Application_GetRegion(void)
         pSilion->rxBuffer[5U]
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -732,7 +729,7 @@ uint8_t SILION_Application_GetAntenna(void)
         pSilion->rxBuffer[7U]
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -787,7 +784,7 @@ uint8_t SILION_Application_GetPower(void)
         writePower
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -827,7 +824,7 @@ uint8_t SILION_Application_GetProtocol(void)
         pSilion->rxBuffer[6U]
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -871,7 +868,7 @@ uint8_t SILION_Application_GetSession(void)
         pSilion->rxBuffer[7U]
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -934,7 +931,7 @@ uint8_t SILION_Application_GetFrequency(void)
         "\r\n"
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -985,7 +982,7 @@ uint8_t SILION_Application_GetRegions(void)
         "\r\n"
     );
 
-    VCP_SendString(response);
+    HOST_SendString(response);
 
     SILION_ClearFrame(pSilion);
 
@@ -1586,7 +1583,7 @@ uint8_t SILION_Application_ReadTagData(
         wordCount
     );
 
-    VCP_SendString(debug);
+    HOST_SendString(debug);
 
     for(uint16_t i = 0U; i < dataLength; i++)
     {
@@ -1598,10 +1595,10 @@ uint8_t SILION_Application_ReadTagData(
             data[i]
         );
 
-        VCP_SendString(hex);
+        HOST_SendString(hex);
     }
 
-    VCP_SendString("\r\n");
+    HOST_SendString("\r\n");
 
     return 1U;
 }
@@ -1705,7 +1702,7 @@ uint8_t SILION_Application_SingleInventory(
             }
         }
 
-        VCP_SendString(
+        HOST_SendString(
             "NO_TAG\r\n"
         );
 
